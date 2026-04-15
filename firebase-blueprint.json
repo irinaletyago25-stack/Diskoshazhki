@@ -1,0 +1,42 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User settings and profile information",
+      "type": "object",
+      "properties": {
+        "userName": { "type": "string" },
+        "theme": { "type": "string", "enum": ["dark", "light", "pink"] },
+        "notifEnabled": { "type": "boolean" },
+        "notifTime": { "type": "string" },
+        "customQuote": {
+          "type": "object",
+          "properties": {
+            "text": { "type": "string" },
+            "author": { "type": "string" }
+          }
+        }
+      }
+    },
+    "AppState": {
+      "title": "App State",
+      "description": "Full application state for synchronization",
+      "type": "object",
+      "properties": {
+        "habits": { "type": "array" },
+        "goals": { "type": "array" },
+        "tasks": { "type": "array" },
+        "journalEntries": { "type": "object" },
+        "customQuotes": { "type": "array" },
+        "lastRecurringReset": { "type": "string" },
+        "customCategories": { "type": "array" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "AppState",
+      "description": "User's full application state"
+    }
+  }
+}

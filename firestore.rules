@@ -1,0 +1,56 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId}
+// Fields:
+//   - habits: array (required)
+//   - goals: array (required)
+//   - tasks: array (required)
+//   - journalEntries: map (required)
+//   - customQuotes: array (required)
+//   - settings: map (required)
+//   - lastRecurringReset: string (required)
+//   - customCategories: array (required)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isValidState(data) {
+      return data.habits is list &&
+             data.goals is list &&
+             data.tasks is list &&
+             data.journalEntries is map &&
+             data.settings is map &&
+             data.lastRecurringReset is string &&
+             data.customCategories is list;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidState(request.resource.data);
+      allow update: if isOwner(userId) && isValidState(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+    
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
