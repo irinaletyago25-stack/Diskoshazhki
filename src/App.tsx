@@ -7,7 +7,8 @@ import {
   ChevronLeft, ChevronRight, Download, Upload, 
   Camera, Moon, Sun, Palette, Zap, Bell, LogIn, LogOut,
   RefreshCw, Trophy, Mic, MicOff, Share2, MessageSquare,
-  Droplets, Cat, Timer, PieChart
+  Droplets, Cat, Timer, PieChart, Leaf, Brain, Music,
+  Flower2, PawPrint, Circle, Heart, Star, Tag
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import confetti from 'canvas-confetti';
@@ -65,10 +66,10 @@ const Toast = ({ message, type, onClose }: ToastProps) => (
 
 const OnboardingModal = ({ step, onNext, onSkip }: { step: number, onNext: () => void, onSkip: () => void }) => {
   const steps = [
-    { title: "Привет! 🪩", text: "Добро пожаловать в Дискошажки — твой бережный трекер жизни с блёстками.", icon: "✨" },
-    { title: "Бережный ритм 🌸", text: "Мы верим в маленькие шаги. Отмечай привычки, ставь цели и не забывай хвалить себя.", icon: "🌱" },
-    { title: "Дневник и ИИ ✨", text: "Записывай мысли, а наш Диско-ИИ поможет тебе с рефлексией и даст добрый совет.", icon: "🧠" },
-    { title: "Party Mode! 💃", text: "Кликни 5 раз на логотип, чтобы устроить себе диско-паузу. Ты — звезда!", icon: "🪩" }
+    { title: "Привет!", text: "Добро пожаловать в Дискошажки — твой бережный трекер жизни с блёстками.", icon: <Sparkles size={48} className="text-primary" /> },
+    { title: "Бережный ритм", text: "Мы верим в маленькие шаги. Отмечай привычки, ставь цели и не забывай хвалить себя.", icon: <Leaf size={48} className="text-good" /> },
+    { title: "Дневник и ИИ", text: "Записывай мысли, а наш Диско-ИИ поможет тебе с рефлексией и даст добрый совет.", icon: <Brain size={48} className="text-primary-2" /> },
+    { title: "Party Mode!", text: "Кликни 5 раз на логотип, чтобы устроить себе диско-паузу. Ты — звезда!", icon: <Music size={48} className="text-accent" /> }
   ];
 
   return (
@@ -78,7 +79,7 @@ const OnboardingModal = ({ step, onNext, onSkip }: { step: number, onNext: () =>
         animate={{ scale: 1, opacity: 1 }}
         className="card max-w-md w-full text-center space-y-6 p-8"
       >
-        <div className="text-6xl">{steps[step].icon}</div>
+        <div className="flex justify-center">{steps[step].icon}</div>
         <h2 className="text-2xl font-bold">{steps[step].title}</h2>
         <p className="text-muted leading-relaxed">{steps[step].text}</p>
         <div className="flex gap-3 pt-4">
@@ -391,7 +392,7 @@ export default function App() {
     if (flash) flash.classList.add('active');
 
     const confettiInterval = setInterval(() => {
-      const pool = ['🪩', '✨', '💜', '🌸', '⭐', '🎉', '💖', '🌈', '🎊', '💫', '🔮', '🌟'];
+      const pool = ['*', '+', 'o', '.', 'x'];
       for (let i = 0; i < 8; i++) {
         const el = document.createElement('div');
         el.className = 'party-confetti-el';
@@ -420,7 +421,7 @@ export default function App() {
       if (flash) flash.classList.remove('active');
       clearInterval(confettiInterval);
       clearInterval(flashInterval);
-      showToast('Ты — главная звезда своей жизни! Танцуй, сияй, живи! 🪩💖', 'success');
+      showToast('Ты — главная звезда своей жизни! Танцуй, сияй, живи!', 'success');
     }, 12000);
   };
 
@@ -429,7 +430,7 @@ export default function App() {
     const element = document.getElementById(elementId);
     if (!element) return;
     try {
-      showToast('Готовлю картинку для тебя... ✨', 'info');
+      showToast('Готовлю картинку для тебя...', 'info');
       const canvas = await html2canvas(element, {
         backgroundColor: null,
         scale: 2,
@@ -440,7 +441,7 @@ export default function App() {
       link.download = `${filename}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
-      showToast('Готово! Сохранено в загрузки 🌸', 'success');
+      showToast('Готово! Сохранено в загрузки', 'success');
     } catch (err) {
       console.error(err);
       showToast('Ой, что-то пошло не так при экспорте', 'error');
@@ -466,15 +467,15 @@ export default function App() {
             ...prev.journalEntries,
             [todayISO()]: {
               ...((prev.journalEntries[todayISO()] as JournalEntry) || { mood: null, note: '', tags: [], pinned: false }),
-              note: ((prev.journalEntries[todayISO()] as JournalEntry)?.note || '') + "\n\n✨ Совет от Диско-ИИ:\n" + text
+              note: ((prev.journalEntries[todayISO()] as JournalEntry)?.note || '') + "\n\nСовет от Диско-ИИ:\n" + text
             }
           }
         }));
-        showToast('ИИ нашептал тебе совет в дневник ✨', 'success');
+        showToast('ИИ нашептал тебе совет в дневник', 'success');
       }
     } catch (err) {
       console.error(err);
-      showToast('ИИ сейчас отдыхает, попробуй позже 🌸', 'error');
+      showToast('ИИ сейчас отдыхает, попробуй позже', 'error');
     } finally {
       setIsAIThinking(false);
     }
@@ -505,11 +506,11 @@ export default function App() {
             }
           }
         }));
-        showToast('Записала твои слова! 🎙️', 'success');
+        showToast('Записала твои слова!', 'success');
       };
       recognitionRef.current.start();
       setIsRecording(true);
-      showToast('Слушаю тебя... 🎙️', 'info');
+      showToast('Слушаю тебя...', 'info');
     }
   };
 
@@ -556,18 +557,22 @@ export default function App() {
     if (nextExp >= expToNextLevel) {
       newState.cat.level += 1;
       newState.cat.exp = nextExp - expToNextLevel;
-      showToast(`Уровень кота повышен! Теперь уровень ${newState.cat.level} 🐾`, 'success');
+      showToast(`Уровень кота повышен! Теперь уровень ${newState.cat.level}`, 'success');
     } else {
       newState.cat.exp = nextExp;
     }
 
-    if (doneToday > 0) {
+      if (doneToday > 0) {
       const isAllDone = doneToday === newState.habits.length;
       fetch('https://api.thecatapi.com/v1/images/search?limit=1')
         .then(res => res.json())
         .then(data => {
-          const mood = isAllDone ? { emoji: '🎉', phrase: 'ВСЕ привычки выполнены! Это лучший день!' } : { emoji: '😸', phrase: 'Молодец! Котик доволен.' };
-          setCatPopup({ show: true, isAllDone, img: data[0].url, mood });
+          const mood = isAllDone ? { icon: <Trophy className="text-warn" />, phrase: 'ВСЕ привычки выполнены! Это лучший день!' } : { icon: <Heart className="text-primary" />, phrase: 'Молодец! Котик доволен.' };
+          setCatPopup({ show: true, isAllDone, img: data[0]?.url || 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=800&q=80', mood });
+        })
+        .catch(() => {
+          const mood = isAllDone ? { icon: <Trophy className="text-warn" />, phrase: 'ВСЕ привычки выполнены! Это лучший день!' } : { icon: <Heart className="text-primary" />, phrase: 'Молодец! Котик доволен.' };
+          setCatPopup({ show: true, isAllDone, img: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=800&q=80', mood });
         });
     }
   };
@@ -688,7 +693,7 @@ export default function App() {
     
     return (
       <div className="space-y-8">
-        <div className="card flex flex-col items-center justify-center py-12 overflow-hidden">
+        <div className="card pattern-dots flex flex-col items-center justify-center py-12 overflow-hidden">
           <h3 className="text-xl font-bold mb-8">Колесо баланса</h3>
           <div className="relative w-80 h-80">
             <svg className="w-full h-full overflow-visible">
@@ -781,16 +786,19 @@ export default function App() {
         <motion.div 
           animate={{ y: [0, -10, 0] }}
           transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-          className="text-9xl filter drop-shadow-2xl"
+          className="filter drop-shadow-2xl text-primary"
         >
-          🐱
+          <Cat size={120} strokeWidth={1.5} />
         </motion.div>
         <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-24 h-4 bg-black/20 rounded-full blur-md" />
       </div>
 
       <div className="text-center space-y-2">
         <h3 className="text-3xl font-black">{state.cat.name}</h3>
-        <div className="text-primary font-bold">Уровень {state.cat.level}</div>
+        <div className="text-primary font-bold flex items-center justify-center gap-2">
+          <Star size={16} className="fill-primary" />
+          Уровень {state.cat.level}
+        </div>
       </div>
 
       <div className="w-full max-w-md space-y-2">
@@ -807,8 +815,10 @@ export default function App() {
         </div>
       </div>
 
-      <div className="card w-full max-w-md">
-        <h3 className="text-lg font-bold mb-4">🏆 Достижения</h3>
+      <div className="card pattern-stars w-full max-w-md">
+        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+          <Trophy size={18} className="text-primary" /> Достижения
+        </h3>
         <div className="grid grid-cols-2 gap-3">
           {state.achievements.map(a => (
             <div 
@@ -826,7 +836,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="card w-full max-w-md">
+      <div className="card pattern-waves w-full max-w-md">
         <h4 className="font-bold mb-4">Как прокачать кота?</h4>
         <ul className="space-y-3 text-sm">
           <li className="flex items-center gap-3">
@@ -848,7 +858,7 @@ export default function App() {
 
   const renderGoals = () => (
     <div className="space-y-6">
-      <div className="card">
+      <div className="card pattern-stars">
         <h3 className="text-lg font-bold mb-4">Новая цель</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <input id="goalName" className="p-3 rounded-xl bg-surface-2 border border-line" placeholder="Название цели" />
@@ -921,7 +931,7 @@ export default function App() {
                   +
                 </button>
                 <div className="text-xs text-muted flex-1 text-right">
-                  {pct === 100 ? 'Цель достигнута! ✨' : `Осталось ${g.target - g.progress} ${g.unit}`}
+                  {pct === 100 ? 'Цель достигнута!' : `Осталось ${g.target - g.progress} ${g.unit}`}
                 </div>
               </div>
             </div>
@@ -990,7 +1000,7 @@ export default function App() {
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="card">
+          <div className="card pattern-waves">
             <h3 className="text-lg font-bold mb-4">График настроения</h3>
             <div className="h-48">
               <Line 
@@ -1015,17 +1025,20 @@ export default function App() {
               />
             </div>
           </div>
-          <div className="card">
+          <div className="card pattern-dots">
             <h3 className="text-lg font-bold mb-4">Бережная поддержка</h3>
             <div className="space-y-3">
               <div className="insight">
-                {overallStreak > 3 ? `Ты держишь ритм уже ${overallStreak} дня! Это потрясающе. ✨` : "Каждый новый день — это шанс начать заново. Я верю в тебя! 🌸"}
+                {overallStreak > 3 ? `Ты держишь ритм уже ${overallStreak} дня! Это потрясающе.` : "Каждый новый день — это шанс начать заново. Я верю в тебя!"}
               </div>
               <div className="insight bg-accent/10 border-accent/20">
-                {state.tasks.filter(t => t.done).length > 0 ? "Ты продуктивна! Завершённые задачи — это повод для гордости. 🏆" : "Не спеши, выбери одну маленькую задачу на сегодня."}
+                {state.tasks.filter(t => t.done).length > 0 ? "Ты продуктивна! Завершённые задачи — это повод для гордости." : "Не спеши, выбери одну маленькую задачу на сегодня."}
               </div>
             </div>
           </div>
+        </div>
+        <div className="card pattern-waves">
+          {renderHeatmap()}
         </div>
       </div>
     );
@@ -1035,19 +1048,25 @@ export default function App() {
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="card pattern-stars">
-          <h3 className="text-lg font-bold mb-2">Серия</h3>
+          <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
+            <Flame size={18} className="text-primary" /> Серия
+          </h3>
           <div className="text-4xl font-extrabold text-primary">{overallStreak}</div>
           <div className="text-muted text-sm">дней с ритмом</div>
         </div>
         <div className="card pattern-dots">
-          <h3 className="text-lg font-bold mb-2">Привычки сегодня</h3>
+          <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
+            <CheckCircle2 size={18} className="text-primary-2" /> Привычки сегодня
+          </h3>
           <div className="text-4xl font-extrabold text-primary-2">
             {state.habits.filter(h => h.dates.includes(todayISO())).length}/{state.habits.length}
           </div>
           <div className="text-muted text-sm">маленьких побед</div>
         </div>
         <div className="card pattern-waves">
-          <h3 className="text-lg font-bold mb-2">Фокус дня</h3>
+          <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
+            <Target size={18} className="text-accent" /> Фокус дня
+          </h3>
           <div className="text-4xl font-extrabold text-accent">
             {state.tasks.filter(t => t.focus && !t.done).length}
           </div>
@@ -1056,16 +1075,40 @@ export default function App() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="card">
-          <h3 className="text-lg font-bold mb-4">Инсайт</h3>
-          <div className="bg-primary/10 p-4 rounded-2xl border border-primary/20 text-sm leading-relaxed">
-            {state.habits.length > 0 ? "Ты отлично справляешься! Маленькие шаги ведут к большим переменам. ✨" : "Начни с малого — добавь свою первую привычку сегодня!"}
+        <div className="card pattern-dots">
+          <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+            <Sparkles size={18} className="text-primary" /> Инсайт
+          </h3>
+          <div className="bg-primary/5 p-4 rounded-2xl border border-primary/10 text-sm leading-relaxed">
+            {state.habits.length > 0 ? "Ты отлично справляешься! Маленькие шаги ведут к большим переменам." : "Начни с малого — добавь свою первую привычку сегодня!"}
           </div>
         </div>
-        <div className="card">
+        <div className="card pattern-stars">
           <h3 className="text-lg font-bold mb-4">Цитата дня</h3>
           <div className="italic text-lg mb-2">"{state.settings.customQuote?.text || QUOTE_POOL[0].text}"</div>
           <div className="text-muted text-sm">— {state.settings.customQuote?.author || QUOTE_POOL[0].author}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="card pattern-waves">
+          <h3 className="text-lg font-bold mb-4">Теплокарта за год</h3>
+          <div id="overviewHeat" className="overflow-x-auto">
+            {renderHeatmap()}
+          </div>
+        </div>
+        <div className="card pattern-dots">
+          <h3 className="text-lg font-bold mb-4">Ближайший прогноз</h3>
+          <div className="space-y-3">
+            {state.goals.map(g => (
+              <div key={g.id} className="p-3 rounded-xl bg-surface-2 border border-line">
+                <div className="font-bold text-sm">{g.name}</div>
+                <div className="text-xs text-muted mt-1">
+                  {g.progress >= g.target ? 'Цель достигнута!' : `Осталось ${g.target - g.progress} ${g.unit}`}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -1073,7 +1116,7 @@ export default function App() {
 
   const renderHabits = () => (
     <div className="space-y-6">
-      <div className="card">
+      <div className="card pattern-waves">
         <h3 className="text-lg font-bold mb-4">Новая привычка</h3>
         <div className="flex flex-wrap gap-2">
           <input 
@@ -1084,20 +1127,20 @@ export default function App() {
           <input 
             id="newHabitIcon" 
             className="w-20 p-3 rounded-xl bg-surface-2 border border-line text-center"
-            placeholder="🌸" 
+            placeholder="A" 
           />
           <button 
             className="btn"
             onClick={() => {
               const name = (document.getElementById('newHabitName') as HTMLInputElement).value.trim();
-              const icon = (document.getElementById('newHabitIcon') as HTMLInputElement).value.trim() || '🌱';
+              const icon = (document.getElementById('newHabitIcon') as HTMLInputElement).value.trim() || 'H';
               if (!name) return;
               handleStateChange(prev => ({
                 ...prev,
                 habits: [{ id: id(), name, icon, dates: [] }, ...prev.habits]
               }));
               (document.getElementById('newHabitName') as HTMLInputElement).value = '';
-              showToast('Привычка добавлена! 🌱', 'success');
+              showToast('Привычка добавлена!', 'success');
             }}
           >
             Добавить
@@ -1112,7 +1155,7 @@ export default function App() {
               <div className="text-2xl">{h.icon}</div>
               <div>
                 <div className="font-bold">{h.name}</div>
-                <div className="text-xs text-muted">Серия: {streakForHabit(h)} 🔥</div>
+                <div className="text-xs text-muted">Серия: {streakForHabit(h)}</div>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -1123,7 +1166,7 @@ export default function App() {
                 )}
                 onClick={() => handleHabitComplete(h.id)}
               >
-                {h.dates.includes(todayISO()) ? '✓ Готово' : 'Отметить'}
+                {h.dates.includes(todayISO()) ? 'Готово' : 'Отметить'}
               </button>
               <button 
                 className="p-2 text-bad opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1147,7 +1190,7 @@ export default function App() {
 
   const renderTasks = () => (
     <div className="space-y-6">
-      <div className="card">
+      <div className="card pattern-dots">
         <h3 className="text-lg font-bold mb-4">Новая задача</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <input 
@@ -1156,9 +1199,9 @@ export default function App() {
             placeholder="Что нужно сделать?" 
           />
           <select id="taskPriority" className="p-3 rounded-xl bg-surface-2 border border-line">
-            <option value="urgent">🔴 Срочно</option>
-            <option value="important">🟡 Важно</option>
-            <option value="someday">⚪ Когда-нибудь</option>
+            <option value="urgent">Срочно</option>
+            <option value="important">Важно</option>
+            <option value="someday">Когда-нибудь</option>
           </select>
           <select id="taskRecurring" className="p-3 rounded-xl bg-surface-2 border border-line">
             <option value="none">Без повтора</option>
@@ -1191,7 +1234,7 @@ export default function App() {
               tasks: [{ id: id(), text, done: false, priority, recurring, weekday, tags: [], focus: false }, ...prev.tasks]
             }));
             (document.getElementById('taskText') as HTMLInputElement).value = '';
-            showToast('Задача добавлена! 📋', 'success');
+            showToast('Задача добавлена!', 'success');
           }}
         >
           Добавить задачу
@@ -1201,8 +1244,9 @@ export default function App() {
       <div className="space-y-4">
         {['urgent', 'important', 'someday'].map(prio => (
           <div key={prio} className="space-y-2">
-            <div className="text-xs font-bold uppercase tracking-wider text-muted px-2">
-              {prio === 'urgent' ? '🔴 Срочно' : prio === 'important' ? '🟡 Важно' : '⚪ Когда-нибудь'}
+            <div className="text-xs font-bold uppercase tracking-wider text-muted px-2 flex items-center gap-2">
+              <Circle size={8} className={cn("fill-current", prio === 'urgent' ? "text-bad" : prio === 'important' ? "text-warn" : "text-line")} />
+              {prio === 'urgent' ? 'Срочно' : prio === 'important' ? 'Важно' : 'Когда-нибудь'}
             </div>
             {state.tasks.filter(t => t.priority === prio).map(t => (
               <div key={t.id} className="card flex items-center justify-between group">
@@ -1262,7 +1306,7 @@ export default function App() {
     const todayEntry = (state.journalEntries[todayISO()] as JournalEntry) || { mood: null, note: '', tags: [], pinned: false };
     return (
       <div className="space-y-6">
-        <div className="card space-y-4">
+        <div className="card pattern-stars space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-bold">Дневник сегодня</h3>
             <div className="text-sm text-muted">{todayISO()}</div>
@@ -1291,7 +1335,12 @@ export default function App() {
                   todayEntry.mood === m.v && "active"
                 )}
               >
-                <span className="text-2xl">{m.e}</span>
+                <div className={cn(
+                  "w-10 h-10 rounded-full flex items-center justify-center mb-1",
+                  todayEntry.mood === m.v ? "bg-primary/20" : "bg-surface"
+                )}>
+                  {m.v >= 4 ? <Sparkles size={20} className="text-primary" /> : m.v === 3 ? <Circle size={20} className="text-muted" /> : <Moon size={20} className="text-primary-2" />}
+                </div>
                 <span className="text-[10px] uppercase font-bold text-muted">{m.l}</span>
               </button>
             ))}
@@ -1363,9 +1412,9 @@ export default function App() {
     }
 
     return (
-      <div className="card" id="heatmap-section">
+      <div id="heatmap-section">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-bold">Теплокарта активности {year}</h3>
+          <h3 className="text-lg font-bold">Активность {year}</h3>
           <div className="flex gap-2">
             <button 
               className="chip-btn p-2"
@@ -1467,8 +1516,10 @@ export default function App() {
 
   const renderSettings = () => (
     <div className="space-y-6">
-      <div className="card">
-        <h3 className="text-lg font-bold mb-4">👤 Профиль</h3>
+      <div className="card pattern-stars">
+        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+          <Moon size={18} className="text-primary" /> Профиль
+        </h3>
         <div className="space-y-4">
           <div className="field">
             <label className="text-sm font-bold text-muted mb-2 block">Твоё имя</label>
@@ -1486,14 +1537,18 @@ export default function App() {
           </div>
           
           <div className="pt-4 border-t border-line">
-            <h4 className="text-sm font-bold text-muted mb-3">☁️ Синхронизация</h4>
+            <h4 className="text-sm font-bold text-muted mb-3 flex items-center gap-2">
+              <RefreshCw size={14} /> Синхронизация
+            </h4>
             {user ? (
               <div className="flex items-center justify-between p-3 rounded-xl bg-surface-2 border border-line">
                 <div className="flex items-center gap-3">
                   {user.photoURL ? (
                     <img src={user.photoURL} className="w-10 h-10 rounded-full border-2 border-primary" referrerPolicy="no-referrer" />
                   ) : (
-                    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white">👤</div>
+                    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white">
+                      <Moon size={20} />
+                    </div>
                   )}
                   <div>
                     <div className="font-bold text-sm">{user.displayName}</div>
@@ -1520,14 +1575,16 @@ export default function App() {
         </div>
       </div>
 
-      <div className="card">
-        <h3 className="text-lg font-bold mb-4">🏷️ Категории</h3>
+      <div className="card pattern-dots">
+        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+          <Tag size={18} className="text-primary" /> Категории
+        </h3>
         <div className="space-y-4">
           <div className="flex gap-2">
             <input 
               id="newCatEmoji" 
               className="w-16 p-3 rounded-xl bg-surface-2 border border-line text-center"
-              placeholder="🏷️" 
+              placeholder="T" 
             />
             <input 
               id="newCatName" 
@@ -1538,14 +1595,14 @@ export default function App() {
               className="btn"
               onClick={() => {
                 const name = (document.getElementById('newCatName') as HTMLInputElement).value.trim();
-                const emoji = (document.getElementById('newCatEmoji') as HTMLInputElement).value.trim() || '🏷️';
+                const emoji = (document.getElementById('newCatEmoji') as HTMLInputElement).value.trim() || 'T';
                 if (!name) return;
                 handleStateChange(prev => ({
                   ...prev,
                   customCategories: [...(prev.customCategories || []), { name, emoji }]
                 }));
                 (document.getElementById('newCatName') as HTMLInputElement).value = '';
-                showToast('Категория добавлена! 🏷️', 'success');
+                showToast('Категория добавлена!', 'success');
               }}
             >
               <Plus size={18} />
@@ -1571,8 +1628,10 @@ export default function App() {
         </div>
       </div>
 
-      <div className="card">
-        <h3 className="text-lg font-bold mb-4">🎨 Интерфейс</h3>
+      <div className="card pattern-stars">
+        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+          <Palette size={18} className="text-primary" /> Интерфейс
+        </h3>
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             {['light', 'dark', 'pink', 'cyberpunk'].map(t => (
@@ -1653,7 +1712,9 @@ export default function App() {
       </div>
 
       <div className="card">
-        <h3 className="text-lg font-bold mb-4">🔔 Уведомления</h3>
+        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+          <Bell size={18} className="text-primary" /> Уведомления
+        </h3>
         <div className="flex items-center justify-between p-3 rounded-xl bg-surface-2 border border-line">
           <div>
             <div className="font-bold text-sm">Напоминания</div>
@@ -1668,7 +1729,7 @@ export default function App() {
                       ...prev,
                       settings: { ...prev.settings, notifEnabled: true }
                     }));
-                    showToast('Уведомления включены! 🔔', 'success');
+                    showToast('Уведомления включены!', 'success');
                   } else {
                     showToast('Доступ к уведомлениям отклонен', 'error');
                   }
@@ -1778,11 +1839,10 @@ export default function App() {
 
       <audio ref={audioRef} loop src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" />
 
-      {/* Sidebar - Desktop */}
       <aside className="hidden lg:flex flex-col w-72 bg-surface border-r border-line p-6 sticky top-0 h-screen">
         <div className="flex items-center gap-3 mb-10 cursor-pointer group" onClick={handleLogoClick}>
           <div className={cn("w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-primary-2 flex items-center justify-center text-white shadow-lg transition-transform", partyClicks > 0 && "scale-110")}>
-            <span className="text-2xl">🪩</span>
+            <Sparkles size={24} />
           </div>
           <div>
             <h1 className="font-display text-2xl font-bold leading-none">Дискошажки</h1>
@@ -1810,10 +1870,10 @@ export default function App() {
 
         <div className="mt-auto pt-6 border-t border-line space-y-2">
           <button 
-            className="w-full text-left p-3 rounded-xl bg-surface-2 border border-line text-sm font-bold hover:bg-line/20 transition-colors"
+            className="w-full text-left p-3 rounded-xl bg-surface-2 border border-line text-sm font-bold hover:bg-line/20 transition-colors flex items-center gap-2"
             onClick={() => showToast(weeklyReport(), 'info')}
           >
-            📊 Отчёт недели
+            <BarChart3 size={18} /> Отчёт недели
           </button>
         </div>
       </aside>
@@ -1826,12 +1886,12 @@ export default function App() {
               <motion.span 
                 animate={{ rotate: 360 }}
                 transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                className="text-2xl"
+                className="text-primary"
               >
-                🪩
+                <Sparkles size={32} />
               </motion.span>
               {new Date().getHours() < 12 ? 'Доброе утро' : new Date().getHours() < 18 ? 'Добрый день' : 'Добрый вечер'}
-              {state.settings.userName ? `, ${state.settings.userName}` : ''} ✨
+              {state.settings.userName ? `, ${state.settings.userName}` : ''}
             </h2>
             <p className="text-muted mt-1">
               {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -1872,9 +1932,9 @@ export default function App() {
             {activeSection === 'settings' && renderSettings()}
             {!['overview', 'habits', 'goals', 'calendar', 'journal', 'tasks', 'pomodoro', 'balance', 'cat', 'analytics', 'heatmap', 'settings'].includes(activeSection) && (
               <div className="card flex flex-col items-center justify-center py-20 text-center">
-                <div className="text-6xl mb-4">🚧</div>
+                <div className="text-6xl mb-4 text-primary"><RefreshCw size={64} className="animate-spin" /></div>
                 <h3 className="text-xl font-bold">Раздел в разработке</h3>
-                <p className="text-muted">Скоро здесь будет магия ✨</p>
+                <p className="text-muted">Скоро здесь будет магия</p>
               </div>
             )}
           </motion.div>
@@ -1929,19 +1989,23 @@ export default function App() {
               className="relative bg-surface border-2 border-primary rounded-[2rem] shadow-2xl overflow-hidden max-w-sm w-full"
             >
               <div className="bg-gradient-to-br from-primary/10 to-primary-2/10 p-4 border-b border-primary/20 flex items-center gap-3">
-                <span className="text-3xl">{catPopup.mood.emoji}</span>
+                <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm">
+                  {catPopup.mood.icon}
+                </div>
                 <p className="font-bold text-primary leading-tight">{catPopup.mood.phrase}</p>
               </div>
               <div className="h-64 bg-bg-soft relative">
                 <img src={catPopup.img} className="w-full h-full object-cover" alt="Cat" />
               </div>
               <div className="p-4 flex justify-between items-center bg-surface">
-                <span className="text-xs text-muted italic">Котик дня 🐾</span>
+                <span className="text-xs text-muted italic flex items-center gap-1">
+                  <PawPrint size={14} /> Котик дня
+                </span>
                 <button 
                   className="btn px-6 py-2 min-h-0 text-sm"
                   onClick={() => setCatPopup(null)}
                 >
-                  Я умница 🐾
+                  Я умница
                 </button>
               </div>
             </motion.div>
@@ -2041,7 +2105,7 @@ export default function App() {
                           return next;
                         })}
                       >
-                        {h.dates.includes(selectedDate) ? '✓' : 'Отметить'}
+                        {h.dates.includes(selectedDate) ? 'Готово' : 'Отметить'}
                       </button>
                     </div>
                   ))}
@@ -2135,7 +2199,7 @@ export default function App() {
                     }
                   </div>
                 ) : (
-                  <div className="text-center py-10 text-muted">Начни вводить для поиска ✨</div>
+                  <div className="text-center py-10 text-muted">Начни вводить для поиска</div>
                 )}
               </div>
             </motion.div>

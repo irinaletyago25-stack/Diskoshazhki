@@ -7,17 +7,17 @@ export const BASE_CATEGORIES = [
 ];
 
 export const BASE_CAT_EMOJI: Record<string, string> = {
-  'здоровье': '💚', 'карьера': '💼', 'финансы': '💰', 'саморазвитие': '🧠', 
-  'семья': '🏠', 'окружение': '👥', 'хобби': '🎨', 'яркость жизни': '✨', 
-  'быт': '🏡', 'канал': '📢'
+  'здоровье': 'H', 'карьера': 'W', 'финансы': 'F', 'саморазвитие': 'S', 
+  'семья': 'F', 'окружение': 'P', 'хобби': 'C', 'яркость жизни': 'L', 
+  'быт': 'H', 'канал': 'M'
 };
 
 export const MOOD_SCALE = [
-  { v: 5, e: '🤩', l: 'Отлично' },
-  { v: 4, e: '😊', l: 'Хорошо' },
-  { v: 3, e: '😐', l: 'Нормально' },
-  { v: 2, e: '😔', l: 'Тяжело' },
-  { v: 1, e: '😢', l: 'Плохо' }
+  { v: 5, e: '5', l: 'Отлично' },
+  { v: 4, e: '4', l: 'Хорошо' },
+  { v: 3, e: '3', l: 'Нормально' },
+  { v: 2, e: '2', l: 'Тяжело' },
+  { v: 1, e: '1', l: 'Плохо' }
 ];
 
 export const QUOTE_POOL = [
@@ -37,9 +37,9 @@ export const RANDOM_THOUGHTS = [
 
 export const DEFAULT_STATE: AppState = {
   habits: [
-    { id: id(), name: 'Вода', icon: '💧', dates: [] },
-    { id: id(), name: 'Португальский', icon: '🇵🇹', dates: [] },
-    { id: id(), name: 'Прогулка', icon: '🌸', dates: [] }
+    { id: id(), name: 'Вода', icon: 'W', dates: [] },
+    { id: id(), name: 'Португальский', icon: 'L', dates: [] },
+    { id: id(), name: 'Прогулка', icon: 'P', dates: [] }
   ],
   goals: [
     { 
@@ -94,9 +94,9 @@ export const DEFAULT_STATE: AppState = {
     sessionsCompleted: 0
   },
   achievements: [
-    { id: 'first_habit', title: 'Первый шаг', description: 'Отметь свою первую привычку', icon: '🌱', unlockedAt: null },
-    { id: 'pomodoro_1', title: 'Глубокий фокус', description: 'Заверши первую сессию Помодоро', icon: '⏱️', unlockedAt: null },
-    { id: 'cat_level_5', title: 'Друг котиков', description: 'Прокачай кота до 5 уровня', icon: '🐾', unlockedAt: null },
-    { id: 'streak_7', title: 'Недельный ритм', description: 'Держи серию 7 дней подряд', icon: '🔥', unlockedAt: null }
+    { id: 'first_habit', title: 'Первый шаг', description: 'Отметь свою первую привычку', icon: 'S', unlockedAt: null },
+    { id: 'pomodoro_1', title: 'Глубокий фокус', description: 'Заверши первую сессию Помодоро', icon: 'F', unlockedAt: null },
+    { id: 'cat_level_5', title: 'Друг котиков', description: 'Прокачай кота до 5 уровня', icon: 'C', unlockedAt: null },
+    { id: 'streak_7', title: 'Недельный ритм', description: 'Держи серию 7 дней подряд', icon: 'R', unlockedAt: null }
   ]
 };
