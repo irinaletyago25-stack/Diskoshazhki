@@ -29,6 +29,7 @@ export interface Task {
   weekday: number | null;
   tags: string[];
   focus: boolean;
+  completedAt?: string;
 }
 
 export interface JournalEntry {
@@ -53,14 +54,8 @@ export interface AppSettings {
   hasSeenOnboarding: boolean;
   dynamicLighting: boolean;
   soundEffects: boolean;
-}
-
-export interface CatState {
-  level: number;
-  exp: number;
-  name: string;
-  unlockedSkins: string[];
-  activeSkin: string;
+  heatmapMode: 'grid' | 'radial';
+  autoSave: boolean;
 }
 
 export interface PomodoroState {
@@ -69,6 +64,8 @@ export interface PomodoroState {
   isActive: boolean;
   mode: 'work' | 'break';
   sessionsCompleted: number;
+  totalFocusMinutes: number;
+  focusTaskId: string | null;
 }
 
 export interface Achievement {
@@ -77,6 +74,12 @@ export interface Achievement {
   description: string;
   icon: string;
   unlockedAt: string | null;
+}
+
+export interface CatState {
+  level: number;
+  exp: number;
+  name: string;
 }
 
 export interface AppState {
@@ -88,8 +91,10 @@ export interface AppState {
   settings: AppSettings;
   lastRecurringReset: string;
   customCategories: CustomCategory[];
-  cat: CatState;
   balance: Record<string, number>;
+  balanceHistory: Record<string, Record<string, number>>;
   pomodoro: PomodoroState;
   achievements: Achievement[];
+  catGallery: string[];
+  cat: CatState;
 }

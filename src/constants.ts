@@ -7,17 +7,17 @@ export const BASE_CATEGORIES = [
 ];
 
 export const BASE_CAT_EMOJI: Record<string, string> = {
-  'здоровье': 'H', 'карьера': 'W', 'финансы': 'F', 'саморазвитие': 'S', 
-  'семья': 'F', 'окружение': 'P', 'хобби': 'C', 'яркость жизни': 'L', 
-  'быт': 'H', 'канал': 'M'
+  'здоровье': '🥗', 'карьера': '🏔️', 'финансы': '💎', 'саморазвитие': '🕯️', 
+  'семья': '🤍', 'окружение': '🎡', 'хобби': '🎀', 'яркость жизни': '✨', 
+  'быт': '🏡', 'канал': '📢'
 };
 
 export const MOOD_SCALE = [
-  { v: 5, e: '5', l: 'Отлично' },
-  { v: 4, e: '4', l: 'Хорошо' },
-  { v: 3, e: '3', l: 'Нормально' },
-  { v: 2, e: '2', l: 'Тяжело' },
-  { v: 1, e: '1', l: 'Плохо' }
+  { v: 5, e: '✨', l: 'Отлично' },
+  { v: 4, e: '🌸', l: 'Хорошо' },
+  { v: 3, e: '☁️', l: 'Нормально' },
+  { v: 2, e: '☂️', l: 'Тяжело' },
+  { v: 1, e: '🌊', l: 'Плохо' }
 ];
 
 export const QUOTE_POOL = [
@@ -35,11 +35,17 @@ export const RANDOM_THOUGHTS = [
   "В чем твоя главная суперсила сегодня?"
 ];
 
+export const JOURNAL_TEMPLATES = [
+  { id: 'morning', name: 'Утро', icon: '☀️', text: 'Что я хочу почувствовать сегодня?\nНа чём хочу сфокусироваться?\nЧто поддержит меня сегодня?' },
+  { id: 'gratitude', name: 'Благодарность', icon: '🙏', text: 'За что я благодарна сегодня?\nЧто было тёплым моментом?\nКому или чему хочется сказать спасибо?' },
+  { id: 'reflection', name: 'Итоги', icon: '🌙', text: 'Что получилось сегодня?\nЧто забрало силы?\nЧто я хочу перенести в завтра?' }
+];
+
 export const DEFAULT_STATE: AppState = {
   habits: [
-    { id: id(), name: 'Вода', icon: 'W', dates: [] },
-    { id: id(), name: 'Португальский', icon: 'L', dates: [] },
-    { id: id(), name: 'Прогулка', icon: 'P', dates: [] }
+    { id: id(), name: 'Вода', icon: '🧊', dates: [] },
+    { id: id(), name: 'Языки', icon: '🕊️', dates: [] },
+    { id: id(), name: 'Прогулка', icon: '🌿', dates: [] }
   ],
   goals: [
     { 
@@ -71,32 +77,37 @@ export const DEFAULT_STATE: AppState = {
     notifTime: '21:00',
     hasSeenOnboarding: false,
     dynamicLighting: true,
-    soundEffects: true
+    soundEffects: true,
+    heatmapMode: 'grid',
+    autoSave: true
   },
   lastRecurringReset: '',
   customCategories: [],
-  cat: {
-    level: 1,
-    exp: 0,
-    name: 'Диско-Кот',
-    unlockedSkins: ['default'],
-    activeSkin: 'default'
-  },
   balance: {
     'здоровье': 5, 'карьера': 5, 'финансы': 5, 'саморазвитие': 5, 
     'семья': 5, 'окружение': 5, 'хобби': 5, 'яркость жизни': 5
   },
+  balanceHistory: {},
   pomodoro: {
     duration: 25,
     timeLeft: 1500,
     isActive: false,
     mode: 'work',
-    sessionsCompleted: 0
+    sessionsCompleted: 0,
+    totalFocusMinutes: 0,
+    focusTaskId: null
   },
   achievements: [
-    { id: 'first_habit', title: 'Первый шаг', description: 'Отметь свою первую привычку', icon: 'S', unlockedAt: null },
-    { id: 'pomodoro_1', title: 'Глубокий фокус', description: 'Заверши первую сессию Помодоро', icon: 'F', unlockedAt: null },
-    { id: 'cat_level_5', title: 'Друг котиков', description: 'Прокачай кота до 5 уровня', icon: 'C', unlockedAt: null },
-    { id: 'streak_7', title: 'Недельный ритм', description: 'Держи серию 7 дней подряд', icon: 'R', unlockedAt: null }
-  ]
+    { id: 'first_habit', title: 'Первый шаг', description: 'Отметь свою первую привычку', icon: '🌱', unlockedAt: null },
+    { id: 'pomodoro_1', title: 'Глубокий фокус', description: 'Заверши первую сессию Помодоро', icon: '⚡', unlockedAt: null },
+    { id: 'streak_7', title: 'Недельный ритм', description: 'Держи серию 7 дней подряд', icon: '🔥', unlockedAt: null },
+    { id: 'cat_level_5', title: 'Мяу-мастер', description: 'Прокачай котика до 5 уровня', icon: '🐾', unlockedAt: null },
+    { id: 'cat_collector', title: 'Кошатница', description: 'Собери 10 котиков в галерею', icon: '😻', unlockedAt: null }
+  ],
+  catGallery: [],
+  cat: {
+    level: 1,
+    exp: 0,
+    name: 'Электронный Кот'
+  }
 };

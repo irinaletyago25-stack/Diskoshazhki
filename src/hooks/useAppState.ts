@@ -23,9 +23,29 @@ export function useAppState() {
   });
 
   useEffect(() => {
-    localStorage.setItem('irinTrackerState', JSON.stringify(state));
     document.documentElement.setAttribute('data-theme', state.settings.theme);
+  }, [state.settings.theme]);
+
+  // Auto-save logic
+  useEffect(() => {
+    if (!state.settings.autoSave) return;
+
+    // Immediate save on any state change (matches "significant changes" for this scale)
+    // We could debounce this if needed, but localStorage is very fast.
+    localStorage.setItem('irinTrackerState', JSON.stringify(state));
   }, [state]);
+
+  // Fallback 30s interval save as requested
+  useEffect(() => {
+    if (!state.settings.autoSave) return;
+
+    const interval = setInterval(() => {
+      localStorage.setItem('irinTrackerState', JSON.stringify(state));
+      console.log('Periodic auto-save triggered');
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [state.settings.autoSave, state]);
 
   return [state, setState] as const;
 }

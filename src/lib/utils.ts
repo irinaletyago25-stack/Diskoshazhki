@@ -30,3 +30,7 @@ export function getDayFromISO(iso: string) {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d);
 }
+
+export function countHabitsOnDate(habits: any[], date: string) {
+  return habits.filter(h => h.dates.includes(date)).length;
+}
