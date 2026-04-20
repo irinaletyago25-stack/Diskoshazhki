@@ -598,7 +598,7 @@ const DynamicLighting = ({ enabled }: { enabled: boolean }) => {
 };
 
 export default function App() {
-  const [state, setState] = useAppState();
+  const [state, setState, lastSaved] = useAppState();
   const [activeSection, setActiveSection] = useState('overview');
   const [user, setUser] = useState<User | null>(null);
   const [toasts, setToasts] = useState<{ id: string, message: string, type: string }[]>([]);
@@ -620,9 +620,21 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [taskFilter, setTaskFilter] = useState({ priority: 'all', status: 'all', search: '' });
+  const [taskFilter, setTaskFilter] = useState({ 
+    priority: 'all', 
+    status: 'all', 
+    search: '', 
+    showAllDates: false,
+    sortBy: 'priority' as 'priority' | 'date' | 'status',
+    selectedTags: [] as string[]
+  });
+  const [newTaskIcon, setNewTaskIcon] = useState('📝');
+  const [newTaskTags, setNewTaskTags] = useState('');
   const [newTaskText, setNewTaskText] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<Task['priority']>('important');
+  const [newTaskDate, setNewTaskDate] = useState(todayISO());
+  const [newTaskRecurring, setNewTaskRecurring] = useState<Task['recurring']>('none');
+  const [taskViewDate, setTaskViewDate] = useState(todayISO());
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
   const [catPopup, setCatPopup] = useState<{ show: boolean, isAllDone: boolean, img: string, mood: any } | null>(null);
   
@@ -719,22 +731,86 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // --- Recurring Tasks Reset ---
+  // --- Task Maintenance (Rollover + Recurring + Weekly Cat) ---
   useEffect(() => {
-    const today = todayISO();
-    if (state.lastRecurringReset !== today) {
-      handleStateChange(prev => {
-        const dayOfWeek = new Date().getDay(); // 0 is Sunday, 1 is Monday
-        const updatedTasks = prev.tasks.map(t => {
-          if (t.recurring === 'daily') return { ...t, done: false };
-          if (t.recurring === 'weekly' && t.weekday === dayOfWeek) return { ...t, done: false };
-          if (t.recurring === 'mon' && dayOfWeek === 1) return { ...t, done: false };
-          return t;
+    const checkAutomation = () => {
+      const today = todayISO();
+      const now = new Date();
+      const dayOfWeek = now.getDay();
+      const hour = now.getHours();
+
+      // Sunday 11:00 PM (23:00) check
+      if (dayOfWeek === 0 && hour >= 23) {
+        const sunISO = todayISO();
+        if (state.lastWeeklyCatDate !== sunISO) {
+          generateWeeklyCat();
+        }
+      }
+
+      if (state.lastRecurringReset !== today) {
+        handleStateChange(prev => {
+          // 1. Rollover !done tasks from the past to today
+          const tasksToMove = prev.tasks.filter(t => !t.done && t.date < today);
+          const rollingTasks = tasksToMove.map(t => ({ 
+            ...t, 
+            date: today, 
+            isRolledOver: true,
+            rolloverCount: (t.rolloverCount || 0) + 1
+          }));
+
+          // Gentle reminders for stuck tasks
+          rollingTasks.forEach(rt => {
+            if (rt.rolloverCount && rt.rolloverCount >= 3) {
+              const name = prev.settings.userName || 'друг';
+              showToast(`${name}, кажется, задача "${rt.text}" забирает много энергии. Может, стоит её разбить или отложить?`, 'info');
+            }
+          });
+
+          // 2. Keep others (future tasks or completed past tasks)
+          let nextTasks = prev.tasks.filter(t => !(!t.done && t.date < today));
+          
+          // Merge rolled over tasks
+          rollingTasks.forEach(rt => {
+            const exists = nextTasks.some(t => t.text === rt.text && t.date === rt.date);
+            if (!exists) nextTasks.push(rt);
+          });
+
+          // 3. Generate recurring instances for today
+          const seeds = prev.tasks.filter(t => t.recurring && t.recurring !== 'none');
+          seeds.forEach(seed => {
+            const alreadyExistsToday = nextTasks.some(t => t.text === seed.text && t.date === today);
+            if (!alreadyExistsToday) {
+              let shouldCreate = false;
+              if (seed.recurring === 'daily') shouldCreate = true;
+              if (seed.recurring === 'weekdays' && [1,2,3,4,5].includes(now.getDay())) shouldCreate = true;
+              if (seed.recurring === 'weekly' && seed.recurringDays?.includes(now.getDay())) shouldCreate = true;
+              
+              if (shouldCreate) {
+                nextTasks.push({ 
+                  ...seed, 
+                  id: id(), 
+                  date: today, 
+                  done: false, 
+                  isRolledOver: false,
+                  completedAt: undefined 
+                });
+              }
+            }
+          });
+
+          return { 
+            ...prev, 
+            tasks: nextTasks, 
+            lastRecurringReset: today 
+          };
         });
-        return { ...prev, tasks: updatedTasks, lastRecurringReset: today };
-      });
-    }
-  }, [state.lastRecurringReset]);
+      }
+    };
+
+    checkAutomation();
+    const intervalId = setInterval(checkAutomation, 60000); // Check every minute for Sunday 23:00 trigger
+    return () => clearInterval(intervalId);
+  }, [state.lastRecurringReset, state.lastWeeklyCatDate, state.settings.userName]);
 
   // --- Onboarding Check ---
   useEffect(() => {
@@ -760,6 +836,8 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const lastNotifiedRef = useRef<string | null>(null);
+
   // --- Pomodoro Logic ---
   useEffect(() => {
     let interval: any;
@@ -776,6 +854,22 @@ export default function App() {
       const nextMode = isWork ? 'break' : 'work';
       const nextTime = nextMode === 'work' ? 25 * 60 : 5 * 60;
       
+      const cycleKey = `${state.pomodoro.mode}-${state.pomodoro.sessionsCompleted}`;
+      if (lastNotifiedRef.current !== cycleKey) {
+        lastNotifiedRef.current = cycleKey;
+        showToast(isWork ? 'Время отдыхать! ☕' : 'Пора за работу! 💻', 'success');
+        if (state.settings.notifEnabled) {
+          try {
+            new Notification(isWork ? 'Фокус завершен' : 'Перерыв окончен', {
+              body: isWork ? 'Отличная работа! Отдохни 5 минут.' : 'Возвращаемся к задачам!',
+              icon: '🪩'
+            });
+          } catch (e) {
+            console.warn("Notification failed", e);
+          }
+        }
+      }
+      
       handleStateChange(prev => ({
         ...prev,
         pomodoro: { 
@@ -787,14 +881,6 @@ export default function App() {
           totalFocusMinutes: isWork ? prev.pomodoro.totalFocusMinutes + prev.pomodoro.duration : prev.pomodoro.totalFocusMinutes
         }
       }));
-      
-      showToast(isWork ? 'Время отдыхать! ☕' : 'Пора за работу! 💻', 'success');
-      if (state.settings.notifEnabled) {
-        new Notification(isWork ? 'Фокус завершен' : 'Перерыв окончен', {
-          body: isWork ? 'Отличная работа! Отдохни 5 минут.' : 'Возвращаемся к задачам!',
-          icon: '🪩'
-        });
-      }
     }
     return () => clearInterval(interval);
   }, [state.pomodoro.isActive, state.pomodoro.timeLeft, state.pomodoro.mode]);
@@ -974,17 +1060,20 @@ export default function App() {
       setTimeout(() => el.remove(), 750);
     });
 
-    setPartyClicks(prev => {
-      const next = prev + 1;
-      if (next >= 5) {
-        activatePartyMode();
-        return 0;
-      }
-      return next;
-    });
+    setPartyClicks(prev => prev + 1);
   };
 
+  useEffect(() => {
+    if (partyClicks >= 5) {
+      if (!isPartyModeRef.current) {
+        activatePartyMode();
+      }
+      setPartyClicks(0);
+    }
+  }, [partyClicks]);
+
   const activatePartyMode = () => {
+    if (isPartyModeRef.current) return;
     setIsPartyMode(true);
     isPartyModeRef.current = true;
     
@@ -1100,6 +1189,112 @@ export default function App() {
     } catch (err) {
       console.error(err);
       showToast('Ой, что-то пошло не так при экспорте', 'error');
+    }
+  };
+
+  // --- New AI Features Helpers ---
+  const handleSmartSplit = async (task: Task) => {
+    if (isAIThinking) return;
+    setIsAIThinking(true);
+    showToast('ИИ подбирает бережные шаги...', 'info');
+    try {
+      const prompt = `Разбей задачу "${task.text}" на 5-7 маленьких, максимально простых и нестрашных подзадач. 
+      Ответь ТОЛЬКО списком JSON строк, например: ["шаг 1", "шаг 2"]. 
+      Бережный тон, на русском языке. Каждая подзадача должна звучать как маленькое действие.`;
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          systemInstruction: "Ты — ассистент по декомпозиции задач. Твоя цель — сделать сложное простым и приятным. Отвечай строго валидным JSON массивом строк.",
+        }
+      });
+
+      const steps = JSON.parse(response.text);
+      if (Array.isArray(steps)) {
+        handleStateChange(prev => {
+          // Remove the original daunting task and insert new ones
+          const otherTasks = prev.tasks.filter(t => t.id !== task.id);
+          const newSubTasks = steps.map(stepText => ({
+            id: id(),
+            text: stepText,
+            done: false,
+            priority: task.priority,
+            date: task.date,
+            recurring: 'none' as const,
+            tags: [...(task.tags || []), 'split'],
+            focus: false,
+            icon: '🐾'
+          }));
+          return {
+            ...prev,
+            tasks: [...newSubTasks, ...otherTasks]
+          };
+        });
+        showToast('Задача бережно разделена на шажки! 🐾', 'success');
+        confetti({ particleCount: 50, spread: 40, origin: { y: 0.8 } });
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('ИИ запутался в детальках, попробуй позже', 'error');
+    } finally {
+      setIsAIThinking(false);
+    }
+  };
+
+  const generateWeeklyCat = async () => {
+    if (isAIThinking) return;
+    setIsAIThinking(true);
+    try {
+      // Analyze week: Mood, habits, tasks
+      const lastWeekDates = [];
+      for(let i=1; i<=7; i++) lastWeekDates.push(isoDate(new Date(Date.now() - i * 86400000)));
+      
+      const moods = lastWeekDates.map(d => (state.journalEntries[d] as JournalEntry)?.mood).filter(Boolean);
+      const avgMood = moods.length ? moods.reduce((a, b) => a! + b!, 0)! / moods.length : 3;
+      const completedTasks = state.tasks.filter(t => t.done && lastWeekDates.includes(t.completedAt || '')).length;
+      const habitCount = state.habits.reduce((acc, h) => acc + h.dates.filter(d => lastWeekDates.includes(d)).length, 0);
+
+      const prompt = `Создай образ котика для итога недели. 
+      Контекст: Среднее настроение ${avgMood.toFixed(1)}/5, выполнено задач: ${completedTasks}, привычек: ${habitCount}.
+      Если много работала — Котик-Профессор, если отдыхала — Котик в гамаке. 
+      Опиши котика для генерации изображения. Стиль: милый, 2D иллюстрация, пастельные тона, уютный.
+      Всегда включай в запрос "Cute cat, digital art, high quality, cozy atmosphere".`;
+
+      showToast('ИИ рисует твоего кота недели... 🎨', 'info');
+
+      // 1. Get Prompt
+      const textResponse = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt
+      });
+
+      // 2. Generate Image
+      const imageResponse = await ai.models.generateContent({
+        model: "gemini-2.5-flash-image",
+        contents: [
+          { text: `Generate image: ${textResponse.text}. Masterpiece, best quality, cute cat style.` }
+        ]
+      });
+
+      const part = imageResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+      if (part?.inlineData) {
+        const url = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+        const lastSun = new Date();
+        lastSun.setDate(lastSun.getDate() - lastSun.getDay()); // Closest Sunday
+        handleStateChange(prev => ({
+          ...prev,
+          catGallery: [url, ...prev.catGallery].slice(0, 50),
+          lastWeeklyCatDate: isoDate(lastSun)
+        }));
+        showToast('Твой Котик Недели готов! 🐈✨ Сохранен в галерею.', 'success');
+      }
+    } catch (err) {
+      console.error(err);
+      // No toast on auto-gen to avoid annoyance if it fails silently
+    } finally {
+      setIsAIThinking(false);
     }
   };
 
@@ -1250,8 +1445,17 @@ export default function App() {
     }
   };
 
-  const handleAddTask = (text: string, priority: Task['priority'] = 'important') => {
+  const handleAddTask = (
+    text: string, 
+    priority: Task['priority'] = 'important', 
+    date?: string, 
+    recurring: Task['recurring'] = 'none', 
+    recurringDays?: number[],
+    icon: string = '📝',
+    tags: string[] = []
+  ) => {
     if (!text.trim()) return;
+    const taskDate = date || todayISO();
     handleStateChange(prev => ({
       ...prev,
       tasks: [
@@ -1260,10 +1464,12 @@ export default function App() {
           text, 
           done: false, 
           priority, 
-          recurring: 'none', 
-          weekday: null, 
-          tags: [], 
-          focus: false 
+          date: taskDate,
+          recurring, 
+          recurringDays,
+          tags: tags.map(t => t.trim()).filter(Boolean), 
+          focus: false,
+          icon
         },
         ...prev.tasks
       ]
@@ -1644,6 +1850,11 @@ export default function App() {
     const categories = Object.keys(state.balance);
     const angleStep = (Math.PI * 2) / categories.length;
     
+    // Get historical data for comparison
+    const historyKeys = Object.keys(state.balanceHistory || {}).sort();
+    const prevMonthKey = historyKeys.length > 0 ? historyKeys[historyKeys.length - 1] : null;
+    const historyData = prevMonthKey ? state.balanceHistory[prevMonthKey] : null;
+
     return (
       <div className="space-y-10">
         <div className="section-header px-2">
@@ -1652,17 +1863,19 @@ export default function App() {
         </div>
 
         <div className="card relative flex flex-col items-center justify-center py-20 overflow-hidden bg-gradient-to-br from-surface via-surface to-primary-soft/10 border-line/40 shadow-xl shadow-primary/5 rounded-[40px]">
-          {/* Animated Background Pulse */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden">
-            <motion.div 
-              animate={{ 
-                scale: [1, 1.2, 1],
-                opacity: [0.1, 0.2, 0.1]
-              }}
-              transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/10 rounded-full blur-[100px]"
-            />
-          </div>
+          {/* Legend for comparison */}
+          {historyData && (
+            <div className="absolute top-8 left-8 flex flex-col gap-2">
+              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest">
+                <div className="w-3 h-3 rounded-full bg-primary" />
+                <span>Сейчас</span>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest opacity-50">
+                <div className="w-3 h-3 rounded-full bg-muted" />
+                <span>Прошлый слепок ({prevMonthKey})</span>
+              </div>
+            </div>
+          )}
 
           <div className="absolute top-8 right-8 z-10">
             <button 
@@ -1743,6 +1956,21 @@ export default function App() {
                   />
                 );
               })}
+
+              {/* Historical Radar Shape */}
+              {historyData && (
+                <polygon 
+                  points={categories.map((cat, i) => {
+                    const r = (historyData[cat] || 0) * 15;
+                    const x = 160 + Math.cos(i * angleStep - Math.PI/2) * r;
+                    const y = 160 + Math.sin(i * angleStep - Math.PI/2) * r;
+                    return `${x},${y}`;
+                  }).join(' ')}
+                  className="fill-muted/10 stroke-muted/40"
+                  strokeWidth="1"
+                  strokeDasharray="4 4"
+                />
+              )}
 
               {/* Central Radar Shape */}
               <motion.polygon 
@@ -2039,7 +2267,7 @@ export default function App() {
           </div>
           <div className="space-y-2">
             <h4 className="text-2xl font-black">Здесь пока пусто</h4>
-            <p className="text-muted max-w-sm mx-auto">Каждая выполненная привычка или задача — это шанс встретить нового котика. Продолжай в том же духе, Ириночка! ✨</p>
+            <p className="text-muted max-w-sm mx-auto">Каждая выполненная привычка или задача — это шанс встретить нового котика. Продолжай в том же духе{state.settings.userName ? ', ' + state.settings.userName : ''}! ✨</p>
           </div>
         </div>
       ) : (
@@ -2057,7 +2285,7 @@ export default function App() {
                    setCatPopup({ show: true, isAllDone: false, img: url, mood: { emoji: '✨', phrase: 'Твой сохранённый котик' } });
                 }}
               >
-                <img src={url} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt="Saved Cat" />
+                <img src={url} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt="Сохранённый котик" />
                 <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                    <div className="flex justify-center text-white/90">
                       <Sparkles size={20} />
@@ -2072,6 +2300,17 @@ export default function App() {
   );
 
   const renderAnalytics = () => {
+    // Word Cloud Logic
+    const tagFreq: Record<string, number> = {};
+    Object.values(state.journalEntries).forEach(entry => {
+      (entry as JournalEntry).tags?.forEach(tag => {
+        tagFreq[tag] = (tagFreq[tag] || 0) + 1;
+      });
+    });
+    const sortedTags = Object.entries(tagFreq)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 15);
+
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2130,6 +2369,36 @@ export default function App() {
               </div>
             )}
           </div>
+          
+          <div className="card">
+            <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+              <Tag size={18} className="text-primary" /> Облако смыслов
+            </h3>
+            <div className="flex flex-wrap gap-2 justify-center items-center py-4">
+              {sortedTags.length > 0 ? sortedTags.map(([tag, count], i) => (
+                <motion.span 
+                  key={tag}
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: i * 0.05 }}
+                  className={cn(
+                    "px-3 py-1.5 rounded-full font-bold transition-all hover:scale-110 cursor-default",
+                    tag.toLowerCase() === 'благодарность' || tag.toLowerCase() === 'спасибо' ? "bg-warn text-white border-none" :
+                    tag.toLowerCase() === 'тревога' || tag.toLowerCase() === 'страх' ? "bg-bad text-white border-none" :
+                    count > 5 ? "bg-primary text-white text-lg" : 
+                    count > 2 ? "bg-primary/20 text-primary text-sm" : 
+                    "bg-surface-2 text-muted text-xs shadow-inner"
+                  )}
+                  style={{ opacity: 0.3 + (count / sortedTags[0][1]) * 0.7 }}
+                >
+                  {tag}
+                </motion.span>
+              )) : (
+                <p className="text-xs text-muted italic">Добавляй больше тегов в дневник, чтобы увидеть облако...</p>
+              )}
+            </div>
+          </div>
+
           <div className="card pattern-dots">
             <h3 className="text-lg font-bold mb-4">Бережная поддержка ✨</h3>
             <div className="space-y-3">
@@ -2222,14 +2491,61 @@ export default function App() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 card">
-          <h3 className="text-lg font-black uppercase tracking-wider mb-6 flex items-center gap-2">
-            <CalendarIcon size={20} className="text-accent" /> Теплокарта жизни
-          </h3>
-          <div id="overviewHeat" className="overflow-x-auto custom-scrollbar">
-            {renderHeatmap()}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="card">
+            <h3 className="text-lg font-black uppercase tracking-wider mb-6 flex items-center gap-2">
+              <CalendarIcon size={20} className="text-accent" /> Теплокарта жизни
+            </h3>
+            <div id="overviewHeat" className="overflow-x-auto custom-scrollbar">
+              {renderHeatmap()}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-black uppercase tracking-wider flex items-center gap-2">
+                <ListTodo size={20} className="text-primary" /> Ближайшие задачи
+              </h3>
+              <button 
+                onClick={() => setActiveSection('tasks')}
+                className="text-[10px] font-black uppercase tracking-widest text-primary hover:underline"
+              >
+                Все задачи →
+              </button>
+            </div>
+            
+            <div className="space-y-3">
+              {state.tasks.filter(t => !t.done).slice(0, 3).length > 0 ? (
+                state.tasks.filter(t => !t.done).slice(0, 3).map(task => (
+                  <div key={task.id} className="flex items-center gap-3 p-3 rounded-xl bg-bg-soft border border-line/50 group transition-all">
+                    <button 
+                      onClick={() => handleTaskToggle(task.id)}
+                      className="w-5 h-5 rounded-md border-2 border-line hover:border-primary transition-all"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold truncate">{task.text}</span>
+                        <button 
+                          onClick={() => handleSmartSplit(task)}
+                          className="p-1 text-primary hover:bg-primary/5 rounded-full"
+                          title="Разбить задачу (ИИ)"
+                        >
+                          <Brain size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    {task.priority === 'urgent' && <div className="w-2 h-2 rounded-full bg-bad animate-pulse" />}
+                  </div>
+                ))
+              ) : (
+                <div className="py-6 text-center text-muted text-xs italic opacity-50">
+                  Нет активных задач на сегодня ✨
+                </div>
+              )}
+            </div>
           </div>
         </div>
+        
         <div className="card">
           <h3 className="text-lg font-black uppercase tracking-wider mb-6 flex items-center gap-2">
             <Sparkles size={20} className="text-good" /> Прогноз целей
@@ -2313,11 +2629,33 @@ export default function App() {
 
   const renderTasks = () => {
     const filteredTasks = state.tasks.filter(t => {
+      const matchDate = taskFilter.showAllDates || t.date === taskViewDate;
       const matchPriority = taskFilter.priority === 'all' || t.priority === taskFilter.priority;
       const matchStatus = taskFilter.status === 'all' || (taskFilter.status === 'done' ? t.done : !t.done);
       const matchSearch = taskFilter.search === '' || t.text.toLowerCase().includes(taskFilter.search.toLowerCase());
-      return matchPriority && matchStatus && matchSearch;
+      const matchTags = taskFilter.selectedTags.length === 0 || taskFilter.selectedTags.every(tag => t.tags?.includes(tag));
+      return matchDate && matchPriority && matchStatus && matchSearch && matchTags;
+    }).sort((a, b) => {
+      if (taskFilter.sortBy === 'date') {
+        return a.date.localeCompare(b.date);
+      }
+      if (taskFilter.sortBy === 'status') {
+        if (a.done === b.done) return 0;
+        return a.done ? 1 : -1;
+      }
+      // Default: priority
+      const pMap = { urgent: 0, important: 1, someday: 2, none: 3 };
+      const aP = pMap[a.priority] ?? 3;
+      const bP = pMap[b.priority] ?? 3;
+      if (aP !== bP) return aP - bP;
+      
+      // Secondary sort for priority is rollover
+      if (a.isRolledOver && !b.isRolledOver) return -1;
+      if (b.isRolledOver && !a.isRolledOver) return 1;
+      return 0;
     });
+
+    const allTags = Array.from(new Set(state.tasks.flatMap(t => t.tags || []))).sort();
 
     const priorityOptions: { value: string, label: string, color: string }[] = [
       { value: 'all', label: 'Все', color: 'bg-surface-2' },
@@ -2328,39 +2666,131 @@ export default function App() {
 
     const statusOptions = [
       { value: 'all', label: 'Все' },
-      { value: 'todo', label: 'В процессе' },
+      { value: 'todo', label: 'К выполнению' },
       { value: 'done', label: 'Выполнено' }
     ];
 
+    const isToday = taskViewDate === todayISO();
+
     return (
       <div className="space-y-6">
+        {/* Date Selector Header */}
+        <div className="flex items-center justify-between bg-surface p-2 rounded-2xl border border-line">
+          <button 
+            onClick={() => setTaskViewDate(addDaysISO(taskViewDate, -1))}
+            className="p-2 hover:bg-surface-2 rounded-xl transition-colors"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <div className="flex flex-col items-center">
+            <span className="text-sm font-bold">
+              {isToday ? 'Сегодня' : taskViewDate}
+            </span>
+            <button 
+              onClick={() => setTaskFilter(prev => ({ ...prev, showAllDates: !prev.showAllDates }))}
+              className={cn(
+                "text-[9px] font-bold uppercase tracking-widest mt-0.5",
+                taskFilter.showAllDates ? "text-primary" : "text-muted"
+              )}
+            >
+              {taskFilter.showAllDates ? "Показать только на дату" : "Показать все даты"}
+            </button>
+          </div>
+          <button 
+            onClick={() => setTaskViewDate(addDaysISO(taskViewDate, 1))}
+            className="p-2 hover:bg-surface-2 rounded-xl transition-colors"
+          >
+            <ChevronRight size={20} />
+          </button>
+        </div>
+
         <div className="card">
           <h3 className="text-lg font-bold mb-4">Добавить задачу ✍️</h3>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input 
-              type="text" 
-              className="flex-1 bg-surface-2 border border-line p-3 rounded-xl outline-none focus:ring-2 focus:ring-primary/20"
-              placeholder="Что нужно сделать?"
-              value={newTaskText}
-              onChange={(e) => setNewTaskText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && (handleAddTask(newTaskText, newTaskPriority), setNewTaskText(''))}
-            />
-            <div className="flex gap-2">
-              <select 
-                className="chip-btn text-xs px-3"
-                value={newTaskPriority}
-                onChange={(e) => setNewTaskPriority(e.target.value as any)}
-              >
-                <option value="someday">💤 Потом</option>
-                <option value="important">⭐ Важно</option>
-                <option value="urgent">🔥 Срочно</option>
-              </select>
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input 
+                type="text" 
+                className="flex-1 bg-surface-2 border border-line p-3 rounded-xl outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="Что нужно сделать?"
+                value={newTaskText}
+                onChange={(e) => setNewTaskText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (handleAddTask(newTaskText, newTaskPriority, newTaskDate, newTaskRecurring, undefined, newTaskIcon, newTaskTags.split(',')), setNewTaskText(''), setNewTaskTags(''))}
+              />
               <button 
-                className="btn py-2 px-6"
-                onClick={() => { handleAddTask(newTaskText, newTaskPriority); setNewTaskText(''); }}
+                className="btn py-2 px-8"
+                onClick={() => { handleAddTask(newTaskText, newTaskPriority, newTaskDate, newTaskRecurring, undefined, newTaskIcon, newTaskTags.split(',')); setNewTaskText(''); setNewTaskTags(''); }}
               >
-                <Plus size={18} />
+                <Plus size={18} className="mr-2" /> Добавить
               </button>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-muted uppercase">Теги (через запятую)</label>
+              <input 
+                type="text"
+                className="bg-surface-2 border border-line p-3 rounded-xl text-xs outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="например: работа, дом, важно"
+                value={newTaskTags}
+                onChange={(e) => setNewTaskTags(e.target.value)}
+              />
+            </div>
+            
+            <div className="flex flex-wrap gap-3 items-center">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-muted uppercase">Иконка</label>
+                <select 
+                  className="chip-btn text-xs px-3 py-1.5"
+                  value={newTaskIcon}
+                  onChange={(e) => setNewTaskIcon(e.target.value)}
+                >
+                  <option value="📝">📝 Заметка</option>
+                  <option value="💻">💻 Технологии</option>
+                  <option value="🏠">🏠 Дом</option>
+                  <option value="🛒">🛒 Покупки</option>
+                  <option value="🔥">🔥 Срочно</option>
+                  <option value="🏃">🏃 Здоровье</option>
+                  <option value="🎨">🎨 Творчество</option>
+                  <option value="💡">💡 Идея</option>
+                  <option value="📚">📚 Учёба</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-muted uppercase">Приоритет</label>
+                <select 
+                  className="chip-btn text-xs px-3 py-1.5"
+                  value={newTaskPriority}
+                  onChange={(e) => setNewTaskPriority(e.target.value as any)}
+                >
+                  <option value="someday">💤 Потом</option>
+                  <option value="important">⭐ Важно</option>
+                  <option value="urgent">🔥 Срочно</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-muted uppercase">Дата</label>
+                <input 
+                  type="date"
+                  className="chip-btn text-xs px-3 py-1.5"
+                  value={newTaskDate}
+                  onChange={(e) => setNewTaskDate(e.target.value)}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-bold text-muted uppercase">Повтор</label>
+                <select 
+                  className="chip-btn text-xs px-3 py-1.5"
+                  value={newTaskRecurring}
+                  onChange={(e) => setNewTaskRecurring(e.target.value as any)}
+                >
+                  <option value="none">Нет</option>
+                  <option value="daily">🔄 Каждый день</option>
+                  <option value="weekdays">💼 Будни</option>
+                  <option value="weekly">📅 Еженедельно</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
@@ -2369,62 +2799,110 @@ export default function App() {
           <div className="flex flex-col gap-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <h3 className="text-lg font-bold">Список задач ({filteredTasks.length}) 📋</h3>
-              <div className="relative w-full sm:w-64">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-                <input 
-                  type="text"
-                  placeholder="Поиск по задачам..."
-                  className="w-full bg-surface-2 border border-line pl-9 pr-4 py-2 rounded-xl text-xs outline-none focus:ring-2 focus:ring-primary/20"
-                  value={taskFilter.search}
-                  onChange={(e) => setTaskFilter(prev => ({ ...prev, search: e.target.value }))}
-                />
+              <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                <div className="relative w-full sm:w-48">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                  <input 
+                    type="text"
+                    placeholder="Поиск..."
+                    className="w-full bg-surface-2 border border-line pl-9 pr-4 py-2 rounded-xl text-xs outline-none focus:ring-2 focus:ring-primary/20"
+                    value={taskFilter.search}
+                    onChange={(e) => setTaskFilter(prev => ({ ...prev, search: e.target.value }))}
+                  />
+                </div>
+                <select 
+                  className="bg-surface-2 border border-line px-3 py-2 rounded-xl text-xs outline-none"
+                  value={taskFilter.sortBy}
+                  onChange={(e) => setTaskFilter(prev => ({ ...prev, sortBy: e.target.value as any }))}
+                >
+                  <option value="priority">Сортировка: Приоритет</option>
+                  <option value="date">Сортировка: Дата</option>
+                  <option value="status">Сортировка: Статус</option>
+                </select>
               </div>
             </div>
 
             <div className="space-y-4">
-              <div>
-                <label className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2 block">Приоритет</label>
-                <div className="flex flex-wrap gap-2">
-                  {priorityOptions.map(opt => (
-                    <button 
-                      key={opt.value}
-                      onClick={() => setTaskFilter(prev => ({ ...prev, priority: opt.value as any }))}
-                      className={cn(
-                        "chip-btn text-[10px] transition-all",
-                        taskFilter.priority === opt.value ? "bg-primary text-white border-transparent" : "hover:bg-bg-soft"
-                      )}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+              {allTags.length > 0 && (
+                <div>
+                  <label className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2 block">Теги</label>
+                  <div className="flex flex-wrap gap-2">
+                    {allTags.map(tag => (
+                      <button 
+                        key={tag}
+                        onClick={() => setTaskFilter(prev => ({
+                          ...prev,
+                          selectedTags: prev.selectedTags.includes(tag)
+                            ? prev.selectedTags.filter(t => t !== tag)
+                            : [...prev.selectedTags, tag]
+                        }))}
+                        className={cn(
+                          "chip-btn text-[10px] transition-all",
+                          taskFilter.selectedTags.includes(tag) ? "bg-accent text-white border-transparent" : "hover:bg-bg-soft"
+                        )}
+                      >
+                        #{tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-6">
+                <div className="flex-1 min-w-[150px]">
+                  <label className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2 block">Приоритет</label>
+                  <div className="flex flex-wrap gap-2">
+                    {priorityOptions.map(opt => (
+                      <button 
+                        key={opt.value}
+                        onClick={() => setTaskFilter(prev => ({ ...prev, priority: opt.value as any }))}
+                        className={cn(
+                          "chip-btn text-[10px] transition-all",
+                          taskFilter.priority === opt.value ? "bg-primary text-white border-transparent" : "hover:bg-bg-soft"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex-1 min-w-[150px]">
+                  <label className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2 block">Статус</label>
+                  <div className="flex flex-wrap gap-2">
+                    {statusOptions.map(opt => (
+                      <button 
+                        key={opt.value}
+                        onClick={() => setTaskFilter(prev => ({ ...prev, status: opt.value as any }))}
+                        className={cn(
+                          "chip-btn text-[10px] transition-all",
+                          taskFilter.status === opt.value ? "bg-primary text-white border-transparent" : "hover:bg-bg-soft"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <label className="text-[10px] font-bold text-muted uppercase tracking-widest mb-2 block">Статус</label>
-                <div className="flex flex-wrap gap-2">
-                  {statusOptions.map(opt => (
-                    <button 
-                      key={opt.value}
-                      onClick={() => setTaskFilter(prev => ({ ...prev, status: opt.value as any }))}
-                      className={cn(
-                        "chip-btn text-[10px] transition-all",
-                        taskFilter.status === opt.value ? "bg-primary text-white border-transparent" : "hover:bg-bg-soft"
-                      )}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                  {(taskFilter.priority !== 'all' || taskFilter.status !== 'all' || taskFilter.search !== '') && (
-                    <button 
-                      onClick={() => setTaskFilter({ priority: 'all', status: 'all', search: '' })}
-                      className="text-[10px] font-bold text-bad hover:underline ml-auto"
-                    >
-                      Сбросить фильтры
-                    </button>
-                  )}
+              {(taskFilter.priority !== 'all' || taskFilter.status !== 'all' || taskFilter.search !== '' || taskFilter.showAllDates || taskFilter.selectedTags.length > 0) && (
+                <div className="flex justify-start">
+                  <button 
+                    onClick={() => setTaskFilter({ 
+                      priority: 'all', 
+                      status: 'all', 
+                      search: '', 
+                      showAllDates: false, 
+                      sortBy: 'priority', 
+                      selectedTags: [] 
+                    })}
+                    className="text-[10px] font-bold text-bad hover:underline"
+                  >
+                    Сбросить все фильтры
+                  </button>
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
@@ -2449,17 +2927,52 @@ export default function App() {
                     >
                       {task.done && <Check size={14} strokeWidth={4} />}
                     </button>
+                    <div className="flex-shrink-0 text-xl mx-1">
+                      {task.icon || '📝'}
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <span className={cn(
-                        "block font-medium truncate transition-all", 
-                        task.done ? "line-through text-muted opacity-60" : "text-text"
-                      )}>
-                        {task.text}
-                      </span>
-                      <div className="flex gap-2 mt-1">
+                      <div className="flex items-center gap-2 group/text">
+                        <span className={cn(
+                          "block font-medium truncate transition-all", 
+                          task.done ? "line-through text-muted opacity-60" : "text-text"
+                        )}>
+                          {task.text}
+                        </span>
+                        {!task.done && (
+                          <button 
+                            onClick={() => handleSmartSplit(task)}
+                            className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-primary/10 rounded-full transition-all text-primary flex items-center gap-1"
+                            title="Бережно разбить на шаги (ИИ)"
+                          >
+                            <Brain size={16} />
+                            <span className="text-[10px] font-black uppercase tracking-tighter hidden md:inline">Разбить</span>
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-1 items-center">
                         {task.priority === 'urgent' && <span className="text-[9px] font-bold text-bad uppercase tracking-tighter">🔥 Срочно</span>}
                         {task.priority === 'important' && <span className="text-[9px] font-bold text-warn uppercase tracking-tighter">⭐ Важно</span>}
                         {task.priority === 'someday' && <span className="text-[9px] font-bold text-primary uppercase tracking-tighter">💤 Потом</span>}
+                        
+                        {task.isRolledOver && !task.done && (
+                          <span className="text-[9px] bg-primary/10 text-primary px-1.5 rounded-sm font-bold uppercase tracking-tighter">
+                            🔄 Перенесено
+                          </span>
+                        )}
+
+                        {task.tags && task.tags.map(tag => (
+                          <span key={tag} className="text-[8px] bg-surface-2 text-muted px-1.5 py-0.5 rounded-full border border-line">#{tag}</span>
+                        ))}
+
+                        {(task.rolloverCount || 0) >= 3 && !task.done && (
+                          <span className="text-[9px] text-accent font-black italic block w-full mt-1">
+                            {state.settings.userName ? `«${state.settings.userName}, кажется, эта задача забирает много энергии. Может, стоит её разбить или отложить?»` : '«Кажется, эта задача забирает много энергии. Может, стоит её разбить или отложить?»'}
+                          </span>
+                        )}
+
+                        <span className="text-[9px] text-muted font-medium ml-auto">
+                          {task.date} {task.recurring !== 'none' && `· ${task.recurring}`}
+                        </span>
                       </div>
                     </div>
                     <button 
@@ -2633,9 +3146,12 @@ export default function App() {
       const entry = state.journalEntries[iso] as JournalEntry;
       let score = 0;
       if (habitsCount > 0) score += 1;
-      if (habitsCount >= 3) score += 1;
+      // Activity density: 50% of habits for the day or max 3
+      const threshold = Math.min(3, Math.ceil(state.habits.length / 2));
+      if (habitsCount >= threshold && habitsCount > 0) score += 1;
+      if (habitsCount === state.habits.length && state.habits.length > 0) score += 1;
       if (entry?.mood) score += 1;
-      if (entry?.note && entry.note.length > 10) score += 1;
+      if (entry?.note && entry.note.length > 5) score += 1;
       data[iso] = { val: Math.min(4, score), habitsCount, entry };
     }
     return data;
@@ -2654,6 +3170,12 @@ export default function App() {
 
     const monthLabels: { label: string; col: number }[] = [];
     let currentMonth = -1;
+
+    // Fixed width calculations: cell (14px) + horizontal gap (2px) = 16px
+    const CELL_SIZE = 14;
+    const GAP_H = 2;
+    const WEEK_WIDTH = CELL_SIZE + GAP_H;
+    const LABEL_WIDTH_OFFSET = 26; // Account for "Пн", "Ср", "Пт" etc prefix
 
     const grid = [];
     for (let week = 0; week < 53; week++) {
@@ -2739,12 +3261,12 @@ export default function App() {
           <div className="card overflow-x-auto custom-scrollbar">
             <div className="relative pt-6 min-w-max">
               {/* Month Labels */}
-              <div className="absolute top-0 left-0 right-0 flex text-[10px] text-muted font-bold uppercase tracking-wider">
+              <div className="absolute top-0 left-0 right-0 flex text-[10px] text-muted font-bold uppercase tracking-wider h-5">
                 {monthLabels.map((m, i) => (
                   <div 
                     key={i} 
                     className="absolute" 
-                    style={{ left: `${m.col * 18}px` }}
+                    style={{ left: `${LABEL_WIDTH_OFFSET + m.col * WEEK_WIDTH}px` }}
                   >
                     {m.label}
                   </div>
@@ -2802,11 +3324,11 @@ export default function App() {
             <div className="mt-8 flex items-center justify-end gap-2 text-[10px] font-bold text-muted uppercase tracking-widest px-2">
                <span>Меньше</span>
                <div className="flex gap-1.5">
-                  <div className="w-3.5 h-3.5 rounded-[2px] bg-surface-2 border border-line/10" />
-                  <div className="w-3.5 h-3.5 rounded-[2px] lv1" title="1-2 активности" />
-                  <div className="w-3.5 h-3.5 rounded-[2px] lv2" title="3-4 активности" />
-                  <div className="w-3.5 h-3.5 rounded-[2px] lv3" title="5-6 активностей" />
-                  <div className="w-3.5 h-3.5 rounded-[2px] lv4" title="7+ активностей" />
+                  <div className="w-3.5 h-3.5 rounded-[2px] bg-surface-2 border border-line/10" title="Нет активности" />
+                  <div className="w-3.5 h-3.5 rounded-[2px] lv1" title="Минимум активности (1+ действие)" />
+                  <div className="w-3.5 h-3.5 rounded-[2px] lv2" title="Хороший темп (50% целей)" />
+                  <div className="w-3.5 h-3.5 rounded-[2px] lv3" title="Продуктивно (Все цели или цели+настроение)" />
+                  <div className="w-3.5 h-3.5 rounded-[2px] lv4" title="Идеально (Все цели + дневник)" />
                </div>
                <span>Больше</span>
             </div>
@@ -2843,11 +3365,11 @@ export default function App() {
           <div className="flex items-center gap-2 text-[10px] text-muted font-bold uppercase">
             <span>Меньше</span>
             <div className="flex gap-1">
-              <div className="w-3 h-3 rounded-[2px] bg-surface-2" />
-              <div className="w-3 h-3 rounded-[2px] lv1" />
-              <div className="w-3 h-3 rounded-[2px] lv2" />
-              <div className="w-3 h-3 rounded-[2px] lv3" />
-              <div className="w-3 h-3 rounded-[2px] lv4" />
+              <div className="w-3 h-3 rounded-[2px] bg-surface-2" title="Нет активности" />
+              <div className="w-3 h-3 rounded-[2px] lv1" title="Минимум" />
+              <div className="w-3 h-3 rounded-[2px] lv2" title="50% целей" />
+              <div className="w-3 h-3 rounded-[2px] lv3" title="Все цели" />
+              <div className="w-3 h-3 rounded-[2px] lv4" title="Идеал" />
             </div>
             <span>Больше</span>
           </div>
@@ -2858,10 +3380,12 @@ export default function App() {
             </div>
             <div className="absolute bottom-full right-0 mb-2 w-48 p-3 bg-surface border border-line rounded-xl shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 z-50 translate-y-2 group-hover:translate-y-0">
               <ul className="text-[10px] space-y-1.5 text-muted font-medium">
-                <li className="flex justify-between"><span>Привычка</span> <span className="text-primary">+1</span></li>
-                <li className="flex justify-between"><span>3+ привычки</span> <span className="text-primary">+1</span></li>
+                <li className="flex justify-between"><span>Мин. 1 привычка</span> <span className="text-primary">+1</span></li>
+                <li className="flex justify-between"><span>50% целей (до 3)</span> <span className="text-primary">+1</span></li>
+                <li className="flex justify-between"><span>Все привычки</span> <span className="text-primary">+1</span></li>
                 <li className="flex justify-between"><span>Настроение</span> <span className="text-primary">+1</span></li>
-                <li className="flex justify-between"><span>Заметка {'>'}10 симв.</span> <span className="text-primary">+1</span></li>
+                <li className="flex justify-between"><span>Заметка {'>'}5 симв.</span> <span className="text-primary">+1</span></li>
+                <li className="pt-1 border-t border-line/5 text-[9px] text-primary/60 italic">Макс. уровень — 4</li>
               </ul>
             </div>
           </div>
@@ -2899,9 +3423,21 @@ export default function App() {
             </div>
           </div>
           
-          <div className="pt-8 border-t border-line">
-            <h4 className="text-[10px] font-black uppercase tracking-widest text-muted mb-4">Синхронизация ☁️</h4>
-            {user ? (
+          <div className="pt-8 border-t border-line space-y-4">
+            <div>
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-muted mb-4">Статистика 📊</h4>
+              <button 
+                className="btn w-full py-4 flex items-center justify-center gap-3 bg-primary-soft text-primary border border-primary/20 hover:bg-primary hover:text-white transition-all shadow-sm"
+                onClick={() => setIsReportModalOpen(true)}
+              >
+                <BarChart3 size={20} />
+                Посмотреть отчёт недели
+              </button>
+            </div>
+            
+            <div>
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-muted mb-4">Синхронизация ☁️</h4>
+              {user ? (
               <div className="flex items-center justify-between p-4 rounded-3xl bg-bg-soft border border-line/50">
                 <div className="flex items-center gap-4">
                   {user.photoURL ? (
@@ -2934,8 +3470,9 @@ export default function App() {
             )}
           </div>
         </div>
+      </div>
 
-        <div className="card h-full space-y-8">
+      <div className="card h-full space-y-8">
           <div>
             <h3 className="text-sm font-black uppercase tracking-widest text-primary mb-6 flex items-center gap-2">
               <Palette size={18} /> Интерфейс
@@ -3048,6 +3585,17 @@ export default function App() {
           <div>
             <h1 className="font-display text-2xl font-bold leading-none">Дискошажки</h1>
             <p className="text-xs text-muted mt-1">трекер с блёстками</p>
+            {lastSaved && state.settings.autoSave && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 0.5 }}
+                key={lastSaved.getTime()}
+                className="text-[9px] font-bold uppercase tracking-widest text-muted mt-2 flex items-center gap-1.5"
+              >
+                <div className="w-1 h-1 rounded-full bg-success animate-pulse" />
+                Сохранено в {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </motion.div>
+            )}
           </div>
         </div>
 
@@ -3066,35 +3614,7 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="sidebar-tools mt-auto pt-6 border-t border-line/40 space-y-3 px-2 pb-2">
-          <button 
-            className="group w-full text-left flex items-center justify-between p-4 rounded-3xl hover:bg-bg-soft transition-all duration-300 border border-transparent hover:border-line"
-            onClick={() => setIsReportModalOpen(true)}
-          >
-            <div className="flex items-center gap-3">
-               <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <BarChart3 size={20} />
-               </div>
-               <span className="font-bold text-sm">Отчёт недели</span>
-            </div>
-            <ChevronRight size={16} className="text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
-          </button>
-          <button 
-            className="group w-full text-left flex items-center justify-between p-4 rounded-3xl hover:bg-bg-soft transition-all duration-300 border border-transparent hover:border-line"
-            onClick={() => handleStateChange(prev => ({
-              ...prev,
-              settings: { ...prev.settings, theme: prev.settings.theme === 'dark' ? 'light' : 'dark' }
-            }))}
-          >
-            <div className="flex items-center gap-3">
-               <div className="w-10 h-10 rounded-2xl bg-accent/10 text-accent flex items-center justify-center group-hover:scale-110 transition-transform">
-                  {state.settings.theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-               </div>
-               <span className="font-bold text-sm">Сменить тему</span>
-            </div>
-            <div className="text-[10px] font-black uppercase tracking-widest text-muted">{state.settings.theme}</div>
-          </button>
-        </div>
+        {/* Sidebar Tools Removed as requested */}
       </aside>
       
       {/* Mobile Drawer */}
@@ -3147,39 +3667,7 @@ export default function App() {
                 ))}
               </nav>
               
-              <div className="sidebar-tools pt-6 border-t border-line/40 space-y-2">
-                <button 
-                  className="group w-full text-left flex items-center justify-between p-4 rounded-3xl hover:bg-bg-soft transition-all duration-300 border border-transparent hover:border-line"
-                  onClick={() => {
-                    setIsReportModalOpen(true);
-                    setIsDrawerOpen(false);
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
-                      <BarChart3 size={20} />
-                    </div>
-                    <span className="font-bold text-sm">Отчёт недели</span>
-                  </div>
-                </button>
-                <button 
-                  className="group w-full text-left flex items-center justify-between p-4 rounded-3xl hover:bg-bg-soft transition-all duration-300 border border-transparent hover:border-line"
-                  onClick={() => {
-                    handleStateChange(prev => ({
-                      ...prev,
-                      settings: { ...prev.settings, theme: prev.settings.theme === 'dark' ? 'light' : 'dark' }
-                    }));
-                    setIsDrawerOpen(false);
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-accent/10 text-accent flex items-center justify-center">
-                      {state.settings.theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-                    </div>
-                    <span className="font-bold text-sm">Сменить тему</span>
-                  </div>
-                </button>
-              </div>
+              {/* Mobile Sidebar Tools Removed as requested */}
             </motion.aside>
           </>
         )}
@@ -3379,6 +3867,49 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <label className="text-sm font-bold text-muted block">Задачи на этот день</label>
+                  <button 
+                    onClick={() => {
+                      const text = prompt('Введите задачу:');
+                      if (text) handleAddTask(text, 'important', selectedDate);
+                    }}
+                    className="text-[10px] font-bold text-primary hover:underline uppercase"
+                  >
+                    + Добавить
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {state.tasks.filter(t => t.date === selectedDate).length > 0 ? (
+                    state.tasks.filter(t => t.date === selectedDate).map(t => (
+                      <div key={t.id} className="flex items-center gap-3 p-3 rounded-xl bg-surface-2 border border-line">
+                        <button 
+                          onClick={() => handleTaskToggle(t.id)}
+                          className={cn(
+                            "w-5 h-5 rounded-md border flex items-center justify-center transition-all",
+                            t.done ? "bg-primary border-primary text-white" : "border-line"
+                          )}
+                        >
+                          {t.done && <Check size={12} strokeWidth={4} />}
+                        </button>
+                        <span className="flex-shrink-0 text-lg mr-1">{t.icon || '📝'}</span>
+                        <div className="flex-1 min-w-0">
+                          <span className={cn("text-sm block truncate", t.done && "line-through opacity-50")}>{t.text}</span>
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {t.tags && t.tags.map(tag => (
+                              <span key={tag} className="text-[7px] bg-bg-soft text-muted px-1 rounded-full border border-line">#{tag}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-xs text-muted italic text-center py-2">Задач пока нет</div>
+                  )}
+                </div>
+              </div>
+
               <button className="btn w-full" onClick={() => setIsDayModalOpen(false)}>
                 Готово
               </button>
@@ -3532,46 +4063,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* FAB */}
-      <div className="fixed bottom-6 right-6 z-[5000]">
-        <AnimatePresence>
-          {isFABOpen && (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.5, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.5, y: 20 }}
-              className="absolute bottom-20 right-0 flex flex-col gap-3 items-end"
-            >
-              <button 
-                onClick={() => { setIsHabitModalOpen(true); setIsFABOpen(false); }}
-                className="flex items-center gap-2 bg-surface border border-line p-3 rounded-2xl shadow-xl hover:bg-surface-2 transition-all"
-              >
-                <span className="text-sm font-bold">Привычка</span>
-                <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center"><CheckCircle2 size={20} /></div>
-              </button>
-              <button 
-                onClick={() => { setActiveSection('tasks'); setIsFABOpen(false); }}
-                className="flex items-center gap-2 bg-surface border border-line p-3 rounded-2xl shadow-xl hover:bg-surface-2 transition-all"
-              >
-                <span className="text-sm font-bold">Задача</span>
-                <div className="w-10 h-10 rounded-xl bg-accent/10 text-accent flex items-center justify-center"><ListTodo size={20} /></div>
-              </button>
-              <button 
-                onClick={() => { setActiveSection('journal'); setIsFABOpen(false); }}
-                className="flex items-center gap-2 bg-surface border border-line p-3 rounded-2xl shadow-xl hover:bg-surface-2 transition-all"
-              >
-                <span className="text-sm font-bold">Заметка</span>
-                <div className="w-10 h-10 rounded-xl bg-primary-2/10 text-primary-2 flex items-center justify-center"><BookOpen size={20} /></div>
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <button 
-          className={cn("fab", isFABOpen && "rotate-45")}
-          onClick={() => setIsFABOpen(!isFABOpen)}
-        >
-          <Plus size={32} />
-        </button>
+      {/* FAB removed as requested */}
 
         {/* Habit Modal */}
         <AnimatePresence>
@@ -3780,7 +4272,6 @@ export default function App() {
           })()}
         </AnimatePresence>
       </div>
-    </div>
     </ErrorBoundary>
   );
 

@@ -20,9 +20,15 @@ export function todayISO() {
   return isoDate(new Date());
 }
 
-export function addDaysISO(n: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
+export function addDaysISO(base: string | number, n?: number) {
+  let d: Date;
+  if (typeof base === 'number') {
+    d = new Date();
+    d.setDate(d.getDate() + base);
+  } else {
+    d = getDayFromISO(base);
+    d.setDate(d.getDate() + (n || 0));
+  }
   return isoDate(d);
 }
 

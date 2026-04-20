@@ -7,7 +7,7 @@ export const BASE_CATEGORIES = [
 ];
 
 export const BASE_CAT_EMOJI: Record<string, string> = {
-  'здоровье': '🥗', 'карьера': '🏔️', 'финансы': '💎', 'саморазвитие': '🕯️', 
+  'здоровье': '🥗', 'карьера': '🏔️', 'финансы': '💎', 'саморазвитие': '🧠', 
   'семья': '🤍', 'окружение': '🎡', 'хобби': '🎀', 'яркость жизни': '✨', 
   'быт': '🏡', 'канал': '📢'
 };
@@ -63,8 +63,8 @@ export const DEFAULT_STATE: AppState = {
     }
   ],
   tasks: [
-    { id: id(), text: 'Собрать идеи для лекции', done: false, priority: 'important', recurring: 'weekly', weekday: 1, tags: ['работа'], focus: true },
-    { id: id(), text: 'Записать 3 мысли для канала', done: false, priority: 'urgent', recurring: 'none', weekday: null, tags: ['идея'], focus: true }
+    { id: id(), text: 'Собрать идеи для лекции', done: false, priority: 'important', date: addDaysISO(0), recurring: 'weekly', recurringDays: [1], tags: ['работа'], focus: true },
+    { id: id(), text: 'Записать 3 мысли для канала', done: false, priority: 'urgent', date: addDaysISO(0), recurring: 'none', tags: ['идея'], focus: true }
   ],
   journalEntries: {},
   customQuotes: [],
@@ -109,5 +109,6 @@ export const DEFAULT_STATE: AppState = {
     level: 1,
     exp: 0,
     name: 'Электронный Кот'
-  }
+  },
+  lastWeeklyCatDate: ''
 };

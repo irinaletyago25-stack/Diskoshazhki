@@ -25,11 +25,15 @@ export interface Task {
   text: string;
   done: boolean;
   priority: 'urgent' | 'important' | 'someday';
-  recurring: 'none' | 'daily' | 'weekly' | 'mon';
-  weekday: number | null;
+  date: string; // The date this task is planned for (YYYY-MM-DD)
+  recurring: 'none' | 'daily' | 'weekly' | 'weekdays';
+  recurringDays?: number[]; // [0-6] for weekly
   tags: string[];
   focus: boolean;
   completedAt?: string;
+  isRolledOver?: boolean;
+  rolloverCount?: number;
+  icon?: string;
 }
 
 export interface JournalEntry {
@@ -97,4 +101,5 @@ export interface AppState {
   achievements: Achievement[];
   catGallery: string[];
   cat: CatState;
+  lastWeeklyCatDate?: string; // Sunday date of the last generated weekly cat
 }

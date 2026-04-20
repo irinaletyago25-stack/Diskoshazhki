@@ -3,10 +3,12 @@ import { AppState } from '../types';
 import { DEFAULT_STATE } from '../constants';
 
 export function useAppState() {
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [state, setState] = useState<AppState>(() => {
     try {
       const saved = localStorage.getItem('irinTrackerState');
       if (saved) {
+        setLastSaved(new Date());
         const parsed = JSON.parse(saved);
         // Basic merge with default state to ensure new fields are present
         return { 
@@ -26,26 +28,25 @@ export function useAppState() {
     document.documentElement.setAttribute('data-theme', state.settings.theme);
   }, [state.settings.theme]);
 
-  // Auto-save logic
+  // Auto-save logic: On every state change
   useEffect(() => {
     if (!state.settings.autoSave) return;
-
-    // Immediate save on any state change (matches "significant changes" for this scale)
-    // We could debounce this if needed, but localStorage is very fast.
     localStorage.setItem('irinTrackerState', JSON.stringify(state));
+    setLastSaved(new Date());
   }, [state]);
 
-  // Fallback 30s interval save as requested
+  // Periodic fallback: Every 30s, independent of state change frequency
   useEffect(() => {
     if (!state.settings.autoSave) return;
 
     const interval = setInterval(() => {
       localStorage.setItem('irinTrackerState', JSON.stringify(state));
-      console.log('Periodic auto-save triggered');
+      setLastSaved(new Date());
+      console.log('Periodic sync checkpoint');
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [state.settings.autoSave, state]);
+  }, [state.settings.autoSave]);
 
-  return [state, setState] as const;
+  return [state, setState, lastSaved] as const;
 }
