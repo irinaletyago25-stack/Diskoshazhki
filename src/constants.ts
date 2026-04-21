@@ -24,7 +24,7 @@ export const QUOTE_POOL = [
   { text: 'Мягкость — это не слабость, а точная форма силы.', author: 'Неизвестный источник' },
   { text: 'Маленькие повторения создают большие системы.', author: 'Идея дня' },
   { text: 'Хороший ритм важнее идеального рывка.', author: 'Тихая продуктивность' },
-  { text: 'Ты можешь делать глубоко и бережно одновременно.', author: 'Напоминание Ириночке' }
+  { text: 'Ты можешь делать глубоко и бережно одновременно.', author: 'Напоминание тебе' }
 ];
 
 export const RANDOM_THOUGHTS = [
@@ -42,30 +42,9 @@ export const JOURNAL_TEMPLATES = [
 ];
 
 export const DEFAULT_STATE: AppState = {
-  habits: [
-    { id: id(), name: 'Вода', icon: '🧊', dates: [] },
-    { id: id(), name: 'Языки', icon: '🕊️', dates: [] },
-    { id: id(), name: 'Прогулка', icon: '🌿', dates: [] }
-  ],
-  goals: [
-    { 
-      id: id(), 
-      name: 'Дописать методологию', 
-      progress: 45, 
-      target: 100, 
-      unit: '%', 
-      deadline: addDaysISO(23), 
-      history: [
-        { date: addDaysISO(-5), v: 30 },
-        { date: addDaysISO(-2), v: 40 },
-        { date: addDaysISO(0), v: 45 }
-      ] 
-    }
-  ],
-  tasks: [
-    { id: id(), text: 'Собрать идеи для лекции', done: false, priority: 'important', date: addDaysISO(0), recurring: 'weekly', recurringDays: [1], tags: ['работа'], focus: true },
-    { id: id(), text: 'Записать 3 мысли для канала', done: false, priority: 'urgent', date: addDaysISO(0), recurring: 'none', tags: ['идея'], focus: true }
-  ],
+  habits: [],
+  goals: [],
+  tasks: [],
   journalEntries: {},
   customQuotes: [],
   settings: {
@@ -78,6 +57,7 @@ export const DEFAULT_STATE: AppState = {
     hasSeenOnboarding: false,
     dynamicLighting: true,
     soundEffects: true,
+    ecoMode: false,
     heatmapMode: 'grid',
     autoSave: true
   },
@@ -95,14 +75,15 @@ export const DEFAULT_STATE: AppState = {
     mode: 'work',
     sessionsCompleted: 0,
     totalFocusMinutes: 0,
-    focusTaskId: null
+    focusTaskId: null,
+    ambientType: 'none'
   },
   achievements: [
     { id: 'first_habit', title: 'Первый шаг', description: 'Отметь свою первую привычку', icon: '🌱', unlockedAt: null },
     { id: 'pomodoro_1', title: 'Глубокий фокус', description: 'Заверши первую сессию Помодоро', icon: '⚡', unlockedAt: null },
     { id: 'streak_7', title: 'Недельный ритм', description: 'Держи серию 7 дней подряд', icon: '🔥', unlockedAt: null },
     { id: 'cat_level_5', title: 'Мяу-мастер', description: 'Прокачай котика до 5 уровня', icon: '🐾', unlockedAt: null },
-    { id: 'cat_collector', title: 'Кошатница', description: 'Собери 10 котиков в галерею', icon: '😻', unlockedAt: null }
+    { id: 'cat_collector', title: 'Кошатница', description: 'Собери 5 котиков в галерею', icon: '😻', unlockedAt: null }
   ],
   catGallery: [],
   cat: {

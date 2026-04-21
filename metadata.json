@@ -1,6 +1,6 @@
 {
   "name": "Дискошажки — Персональный трекер жизни",
   "description": "Адаптивный трекер привычек, целей и настроения с диско-атмосферой, аналитикой и синхронизацией.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": []
 }

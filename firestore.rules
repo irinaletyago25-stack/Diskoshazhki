@@ -20,37 +20,56 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-    
-    function isValidState(data) {
-      return data.habits is list &&
-             data.goals is list &&
-             data.tasks is list &&
-             data.journalEntries is map &&
-             data.settings is map &&
-             data.lastRecurringReset is string &&
-             data.customCategories is list;
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
     }
 
+    // 0.1 Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+       return id is string && id.size() <= 256 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Pillar 2: Validation Blueprint (The "Anti-Update-Gap")
+    function isValidAppState(data) {
+      return data.keys().hasAll(['habits', 'goals', 'tasks', 'journalEntries', 'settings']) &&
+             data.habits is list && data.habits.size() <= 500 &&
+             data.goals is list && data.goals.size() <= 200 &&
+             data.tasks is list && data.tasks.size() <= 5000 &&
+             data.journalEntries is map && data.journalEntries.size() <= 10000 &&
+             data.settings is map &&
+             // Ensure no shadow fields (Pillar 2.1)
+             data.keys().size() <= 25;
+    }
+
+    // Pillar 4 & 5: Identity and State Guard
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidState(request.resource.data);
-      allow update: if isOwner(userId) && isValidState(request.resource.data);
+      
+      // Pillar 3: Path Variable Hardening (isIdValid on {userId})
+      allow create: if isOwner(userId) && isValidId(userId) && isValidAppState(request.resource.data);
+      
+      allow update: if isOwner(userId) && isValidId(userId) && isValidAppState(request.resource.data) && (
+        // Pillar 9: Immortal Identity
+        request.resource.data.keys().hasAll(resource.data.keys()) &&
+        // Pillar 4: Tiered Identity Logic - user owns all fields
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+           'habits', 'goals', 'tasks', 'journalEntries', 'settings', 
+           'lastRecurringReset', 'customCategories', 'customQuotes', 
+           'balance', 'balanceHistory', 'pomodoro', 'achievements',
+           'catGallery', 'cat', 'lastWeeklyCatDate'
+        ])
+      );
+      
       allow delete: if isOwner(userId);
-    }
-    
-    match /{path=**} {
-      allow read, write: if false;
     }
   }
 }

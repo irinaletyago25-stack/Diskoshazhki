@@ -15,6 +15,7 @@ export function useAppState() {
           ...DEFAULT_STATE, 
           ...parsed, 
           settings: { ...DEFAULT_STATE.settings, ...parsed.settings },
+          pomodoro: { ...DEFAULT_STATE.pomodoro, ...parsed.pomodoro },
           customCategories: parsed.customCategories || DEFAULT_STATE.customCategories
         };
       }

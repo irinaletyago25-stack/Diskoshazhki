@@ -40,3 +40,13 @@ export function getDayFromISO(iso: string) {
 export function countHabitsOnDate(habits: any[], date: string) {
   return habits.filter(h => h.dates.includes(date)).length;
 }
+
+/**
+ * Russian pluralization helper
+ * @param count Number to pluralize
+ * @param words Array of 3 forms: ['яблоко', 'яблока', 'яблок']
+ */
+export function pluralize(count: number, words: [string, string, string]) {
+  const cases = [2, 0, 1, 1, 1, 2];
+  return words[(count % 100 > 4 && count % 100 < 20) ? 2 : cases[(count % 10 < 5) ? count % 10 : 5]];
+}

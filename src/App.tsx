@@ -9,7 +9,8 @@ import {
   RefreshCw, Trophy, Mic, MicOff, Share2, MessageSquare,
   Droplets, Timer, PieChart, Leaf, Brain, Music,
   Flower2, PawPrint, Circle, Heart, Star, Tag, Info, FileText, User as UserIcon,
-  ChevronDown, Play, Square, SkipForward
+  ChevronDown, Play, Square, SkipForward, Archive, ArchiveRestore, Pencil, History,
+  TrendingUp, Clock, Hash, Percent, Award
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import confetti from 'canvas-confetti';
@@ -24,7 +25,9 @@ import {
   JOURNAL_TEMPLATES
 } from './constants';
 import { AppState, Habit, Goal, Task, JournalEntry } from './types';
-import { cn, countHabitsOnDate } from './lib/utils';
+import { 
+  cn, countHabitsOnDate, pluralize 
+} from './lib/utils';
 import { 
   auth, db, googleProvider 
 } from './firebase';
@@ -159,6 +162,22 @@ interface ToastProps {
   onClose: () => void;
 }
 
+const EmptyState = ({ icon, title, text }: { icon: string, title: string, text: string }) => (
+  <motion.div 
+    initial={{ opacity: 0, y: 10 }}
+    animate={{ opacity: 1, y: 0 }}
+    className="flex flex-col items-center justify-center py-12 px-4 text-center space-y-4"
+  >
+    <div className="w-20 h-20 rounded-full bg-primary-soft flex items-center justify-center text-4xl shadow-inner border border-primary/10">
+      {icon}
+    </div>
+    <div>
+      <h4 className="text-lg font-bold font-display">{title}</h4>
+      <p className="text-xs text-muted max-w-[200px] mx-auto leading-relaxed">{text}</p>
+    </div>
+  </motion.div>
+);
+
 const Toast = ({ message, type, onClose }: ToastProps) => (
   <motion.div 
     initial={{ opacity: 0, y: 20 }}
@@ -213,12 +232,14 @@ const CatPopup = ({
   data, 
   onClose,
   onSave,
+  onRefresh,
   catLevel,
   catExp
 }: { 
   data: { show: boolean, isAllDone: boolean, img: string, mood: any, breed?: string } | null, 
   onClose: () => void,
   onSave: (url: string) => void,
+  onRefresh: () => void,
   catLevel: number,
   catExp: number
 }) => (
@@ -238,7 +259,15 @@ const CatPopup = ({
           )}
         >
           <div className="relative aspect-square bg-bg-soft">
-            {data.img ? (
+            {data.img === 'error' ? (
+              <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center space-y-4">
+                <div className="text-4xl text-muted opacity-40">😿</div>
+                <p className="text-xs text-muted font-bold">Котик спит, не будем будить. Проверь интернет!</p>
+                <button onClick={onRefresh} className="chip-btn py-2 px-6 flex items-center gap-2">
+                  <RefreshCw size={14} /> Повторить
+                </button>
+              </div>
+            ) : data.img ? (
               <img 
                 src={data.img} 
                 className="w-full h-full object-cover" 
@@ -250,14 +279,23 @@ const CatPopup = ({
                 <RefreshCw className="animate-spin text-primary" size={40} />
               </div>
             )}
-            <div className="absolute top-4 left-4 right-4 flex justify-between">
+            <div className="absolute top-4 left-4 right-4 flex justify-between items-start">
                <div className={cn(
-                 "backdrop-blur-sm px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2",
+                 "backdrop-blur-sm px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2 max-w-[80%]",
                  data.isAllDone ? "bg-primary text-white" : "bg-white/90 text-primary"
                )}>
-                 <span className="text-lg">{data.mood.emoji}</span>
-                 <span>{data.mood.phrase}</span>
+                 <span className="text-lg flex-shrink-0">{data.mood.emoji}</span>
+                 <span className="truncate">{data.mood.phrase}</span>
                </div>
+               
+               {data.img && data.img !== 'error' && (
+                 <button 
+                   onClick={(e) => { e.stopPropagation(); onRefresh(); }}
+                   className="p-2 bg-white/90 text-primary rounded-full shadow-sm hover:scale-110 transition-transform active:scale-95"
+                 >
+                   <RefreshCw size={18} />
+                 </button>
+               )}
             </div>
           </div>
           
@@ -329,22 +367,55 @@ const CatPopup = ({
 const RadialHeatmap = ({ 
   data, 
   year, 
-  onDateClick 
+  onDateClick,
+  theme
 }: { 
-  data: Record<string, { val: number; entry: JournalEntry | null; habitsCount: number }>; 
+  data: Record<string, { val: number; entry: JournalEntry | null; habitsCount: number; completedHabitNames: string[] }>; 
   year: number;
   onDateClick: (date: string) => void;
+  theme: string;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
-  const [tooltip, setTooltip] = useState<{ show: boolean; date: string; mood: number | null; habits: number; x: number; y: number }>({
-    show: false, date: '', mood: null, habits: 0, x: 0, y: 0
+  const [tooltip, setTooltip] = useState<{ 
+    show: boolean; 
+    date: string; 
+    mood: number | null; 
+    habits: number; 
+    habitNames: string[];
+    noteSnippet: string;
+    x: number; 
+    y: number 
+  }>({
+    show: false, date: '', mood: null, habits: 0, habitNames: [], noteSnippet: '', x: 0, y: 0
   });
 
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  const colors = isDark 
-    ? ['#1a1020', '#3a1f45', '#7d2b6e', '#c43f9a', '#ff5dac']
-    : ['#fff1f8', '#ffd3e8', '#f4a7c0', '#e8729a', '#ff5dac'];
+  const isCyber = theme === 'cyberpunk';
+  const isDark = theme === 'dark' || isCyber;
+
+  const heatmapColors = isCyber
+    ? [
+        '#0f0025',             // Level 0
+        '#300030',             // Level 1
+        '#600060',             // Level 2
+        '#ff00ff',             // Level 3
+        '#00ffff'              // Level 4 (Cyan accent)
+      ]
+    : isDark 
+      ? [
+          '#1b131d',                     // Level 0
+          'rgba(255, 93, 172, 0.2)',     // Level 1
+          'rgba(255, 93, 172, 0.45)',    // Level 2
+          'rgba(255, 93, 172, 0.75)',    // Level 3
+          '#ff5dac'                      // Level 4
+        ]
+      : [
+          '#f1f5f9',                     // Level 0
+          'rgba(255, 93, 172, 0.15)',    // Level 1
+          'rgba(255, 93, 172, 0.35)',    // Level 2
+          'rgba(255, 93, 172, 0.65)',    // Level 3
+          '#ec4899'                      // Level 4
+        ];
   
   const todayColor = '#c084fc';
   const textColor = isDark ? '#c8abc0' : '#7f6475';
@@ -386,13 +457,13 @@ const RadialHeatmap = ({
       const a2 = a1 + angleStep;
       const isToday = day.iso === today;
 
-      const r = innerR + (outerR - innerR) * (0.25 + (day.val / 4) * 0.75);
+      const r = innerR + (outerR - innerR) * (0.25 + (Math.min(day.val, 4) / 4) * 0.75);
 
       ctx.beginPath();
       ctx.moveTo(cx, cy);
       ctx.arc(cx, cy, isToday ? outerR + 5 : r, a1, a2);
       ctx.closePath();
-      ctx.fillStyle = isToday ? todayColor : colors[day.val];
+      ctx.fillStyle = isToday ? todayColor : heatmapColors[Math.min(day.val, 4)];
       ctx.fill();
       
       if (isToday) {
@@ -460,13 +531,15 @@ const RadialHeatmap = ({
     if (dayIdx >= 0 && dayIdx < daysInYear) {
       const d = new Date(year, 0, 1 + dayIdx);
       const iso = isoDate(d);
-      const dayInfo = data[iso] || { val: 0, entry: null, habitsCount: 0 };
+      const dayInfo = data[iso] || { val: 0, entry: null, habitsCount: 0, completedHabitNames: [] };
       
       setTooltip({
         show: true,
         date: d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }),
         mood: dayInfo.entry?.mood || null,
         habits: dayInfo.habitsCount,
+        habitNames: dayInfo.completedHabitNames || [],
+        noteSnippet: dayInfo.entry?.note?.slice(0, 60) || '',
         x: e.clientX,
         y: e.clientY
       });
@@ -516,14 +589,29 @@ const RadialHeatmap = ({
       />
       {tooltip.show && (
         <div 
-          className="fixed z-[9999] bg-surface border border-line rounded-xl p-3 shadow-xl pointer-events-none animate-in fade-in duration-150"
-          style={{ left: tooltip.x + 15, top: tooltip.y - 60 }}
+          className="fixed z-[9999] bg-surface border border-line rounded-2xl p-4 shadow-2xl pointer-events-none animate-in fade-in zoom-in-95 duration-150 max-w-[240px]"
+          style={{ left: tooltip.x + 15, top: tooltip.y - 120 }}
         >
-          <div className="text-[10px] font-bold text-muted mb-1">{tooltip.date}</div>
-          <div className="flex items-center gap-2">
-            <span className="text-xl">{tooltip.mood ? MOOD_SCALE.find(m => m.v === tooltip.mood)?.e : '—'}</span>
-            <span className="text-xs font-bold text-muted">{tooltip.habits} привыч.</span>
+          <div className="text-[10px] font-black uppercase tracking-widest text-primary mb-2 opacity-60 border-b border-line pb-1">{tooltip.date}</div>
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-2xl">{tooltip.mood ? MOOD_SCALE.find(m => m.v === tooltip.mood)?.e : '😶'}</span>
+            <div>
+              <div className="text-xs font-black text-text leading-tight">{tooltip.habits} {pluralize(tooltip.habits, ['привычка', 'привычки', 'привычек'])}</div>
+              <div className="text-[9px] font-bold text-muted uppercase tracking-tighter">энергия дня</div>
+            </div>
           </div>
+          {tooltip.habitNames.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-3">
+              {tooltip.habitNames.map((n, i) => (
+                <span key={i} className="px-1.5 py-0.5 bg-primary/10 text-primary text-[8px] font-bold rounded-md uppercase">{n}</span>
+              ))}
+            </div>
+          )}
+          {tooltip.noteSnippet && (
+            <div className="text-[10px] text-muted italic leading-relaxed line-clamp-2 border-t border-line/50 pt-2">
+              «{tooltip.noteSnippet}{tooltip.noteSnippet.length >= 60 ? '...' : ''}»
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -579,7 +667,7 @@ const DynamicLighting = ({ enabled }: { enabled: boolean }) => {
   if (!enabled) return null;
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-[9999] overflow-hidden">
+    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
       <div 
         className="absolute w-[600px] h-[600px] rounded-full blur-[120px] opacity-20 transition-all duration-300 ease-out"
         style={{ 
@@ -588,10 +676,10 @@ const DynamicLighting = ({ enabled }: { enabled: boolean }) => {
           background: 'radial-gradient(circle, var(--primary) 0%, transparent 70%)'
         }}
       />
-      <div className="bg-lamps">
-        <div className="lamp w-64 h-64 bg-primary top-1/4 left-1/4" />
-        <div className="lamp w-96 h-96 bg-primary-2 top-3/4 left-2/3" />
-        <div className="lamp w-80 h-80 bg-accent top-1/2 left-1/10" />
+      <div className="bg-lamps pointer-events-none">
+        <div className="absolute lamp w-64 h-64 bg-primary/10 rounded-full blur-[120px] top-1/4 left-1/4" />
+        <div className="absolute lamp w-96 h-96 bg-primary-2/10 rounded-full blur-[160px] top-3/4 left-2/3" />
+        <div className="absolute lamp w-80 h-80 bg-accent/10 rounded-full blur-[140px] top-1/2 left-1/10" />
       </div>
     </div>
   );
@@ -599,11 +687,115 @@ const DynamicLighting = ({ enabled }: { enabled: boolean }) => {
 
 export default function App() {
   const [state, setState, lastSaved] = useAppState();
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
+
   const [activeSection, setActiveSection] = useState('overview');
   const [user, setUser] = useState<User | null>(null);
   const [toasts, setToasts] = useState<{ id: string, message: string, type: string }[]>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // --- Sound & Audio ---
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const ambientNodeRef = useRef<AudioNode | null>(null);
+
+  const getAudioCtx = () => {
+    if (!audioCtxRef.current) {
+      const AC = window.AudioContext || (window as any).webkitAudioContext;
+      if (AC) audioCtxRef.current = new AC();
+    }
+    return audioCtxRef.current;
+  };
+
+  const playSound = (type: 'click' | 'success' | 'pop' | 'tick' | 'purr' | 'hover') => {
+    if (!state.settings.soundEffects) return;
+    
+    try {
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const theme = state.settings.theme;
+      const now = ctx.currentTime;
+      
+      const playSimple = (freq: number, dur: number, glide: number, wave: OscillatorType = 'sine', gainVal = 0.1) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = wave;
+        osc.frequency.setValueAtTime(freq, now);
+        if (glide !== freq) osc.frequency.exponentialRampToValueAtTime(glide, now + dur);
+        gain.gain.setValueAtTime(gainVal, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + dur);
+      };
+
+      if (type === 'click') {
+        if (theme === 'cyberpunk') playSimple(800, 0.05, 200, 'square', 0.05);
+        else if (theme === 'pink') playSimple(600, 0.15, 300, 'sine', 0.08);
+        else if (theme === 'dark') playSimple(200, 0.08, 50, 'triangle', 0.1);
+        else playSimple(400, 0.1, 100, 'sine', 0.1);
+      } else if (type === 'success') {
+        if (theme === 'cyberpunk') {
+          playSimple(440, 0.1, 880, 'sawtooth', 0.05);
+          playSimple(880, 0.2, 1760, 'sawtooth', 0.03);
+        } else if (theme === 'pink') {
+          playSimple(523.25, 0.4, 523.25, 'sine', 0.1);
+          setTimeout(() => playSimple(659.25, 0.4, 659.25, 'sine', 0.08), 100);
+          setTimeout(() => playSimple(783.99, 0.4, 783.99, 'sine', 0.06), 200);
+        } else {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = theme === 'dark' ? 'triangle' : 'sine';
+          osc.frequency.setValueAtTime(523.25, now);
+          osc.frequency.exponentialRampToValueAtTime(659.25, now + 0.1);
+          osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.2);
+          gain.gain.setValueAtTime(0.1, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.3);
+        }
+      } else if (type === 'pop') {
+        playSimple(200, 0.05, 600, theme === 'cyberpunk' ? 'square' : 'sine', 0.1);
+      } else if (type === 'purr') {
+        // Vibrating low frequency for mrrrrr
+        for(let i=0; i<5; i++) {
+          setTimeout(() => playSimple(150 + Math.random()*20, 0.1, 120, 'triangle', 0.15), i * 150);
+        }
+      } else if (type === 'hover') {
+        playSimple(theme === 'cyberpunk' ? 1200 : 800, 0.02, theme === 'cyberpunk' ? 1000 : 800, 'sine', 0.02);
+      } else if (type === 'tick') {
+        playSimple(theme === 'cyberpunk' ? 1000 : 800, 0.02, theme === 'cyberpunk' ? 1000 : 800, 'square', 0.03);
+      }
+    } catch (e) {
+      console.warn('Audio not supported or blocked');
+    }
+  };
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', state.settings.theme);
+  }, [state.settings.theme]);
+
+  // Global Hover Sound Listener
+  useEffect(() => {
+    if (!state.settings.soundEffects) return;
+    
+    const handleMouseOver = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const isInteractive = target.closest('button, a, .chip-btn, .nav button, input, select');
+      if (isInteractive) {
+        playSound('hover');
+      }
+    };
+
+    document.addEventListener('mouseover', handleMouseOver);
+    return () => document.removeEventListener('mouseover', handleMouseOver);
+  }, [state.settings.soundEffects, state.settings.theme]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isZenMode, setIsZenMode] = useState(false);
   const [isPartyMode, setIsPartyMode] = useState(false);
@@ -631,14 +823,30 @@ export default function App() {
   const [newTaskIcon, setNewTaskIcon] = useState('📝');
   const [newTaskTags, setNewTaskTags] = useState('');
   const [newTaskText, setNewTaskText] = useState('');
+  const [dayModalTaskText, setDayModalTaskText] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<Task['priority']>('important');
   const [newTaskDate, setNewTaskDate] = useState(todayISO());
   const [newTaskRecurring, setNewTaskRecurring] = useState<Task['recurring']>('none');
+  const [newTaskRecurringDays, setNewTaskRecurringDays] = useState<number[]>([]);
   const [taskViewDate, setTaskViewDate] = useState(todayISO());
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
   const [catPopup, setCatPopup] = useState<{ show: boolean, isAllDone: boolean, img: string, mood: any } | null>(null);
   
   const [isHabitModalOpen, setIsHabitModalOpen] = useState(false);
+  const [showArchivedHabits, setShowArchivedHabits] = useState(false);
+  
+  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
+  const [goalModalStep, setGoalModalStep] = useState(1);
+  const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
+  const [showArchivedGoals, setShowArchivedGoals] = useState(false);
+  
+  const [goalName, setGoalName] = useState('');
+  const [goalTarget, setGoalTarget] = useState(100);
+  const [goalUnit, setGoalUnit] = useState('%');
+  const [goalDeadline, setGoalDeadline] = useState('');
+  const [goalIcon, setGoalIcon] = useState('🎯');
+  const [goalColor, setGoalColor] = useState('#ff5dac');
+  const [goalStepValue, setGoalStepValue] = useState(1);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [newHabitName, setNewHabitName] = useState('');
   const [newHabitIcon, setNewHabitIcon] = useState('🌱');
@@ -734,6 +942,7 @@ export default function App() {
   // --- Task Maintenance (Rollover + Recurring + Weekly Cat) ---
   useEffect(() => {
     const checkAutomation = () => {
+      const currentState = stateRef.current;
       const today = todayISO();
       const now = new Date();
       const dayOfWeek = now.getDay();
@@ -742,12 +951,12 @@ export default function App() {
       // Sunday 11:00 PM (23:00) check
       if (dayOfWeek === 0 && hour >= 23) {
         const sunISO = todayISO();
-        if (state.lastWeeklyCatDate !== sunISO) {
+        if (currentState.lastWeeklyCatDate !== sunISO) {
           generateWeeklyCat();
         }
       }
 
-      if (state.lastRecurringReset !== today) {
+      if (currentState.lastRecurringReset !== today) {
         handleStateChange(prev => {
           // 1. Rollover !done tasks from the past to today
           const tasksToMove = prev.tasks.filter(t => !t.done && t.date < today);
@@ -852,7 +1061,17 @@ export default function App() {
     } else if (state.pomodoro.isActive && state.pomodoro.timeLeft === 0) {
       const isWork = state.pomodoro.mode === 'work';
       const nextMode = isWork ? 'break' : 'work';
-      const nextTime = nextMode === 'work' ? 25 * 60 : 5 * 60;
+      
+      // Use previous duration or logical defaults
+      let nextDuration = 25;
+      if (nextMode === 'break') {
+        nextDuration = 5;
+      } else {
+        // Try to keep the previous work duration if it was something special like 50
+        nextDuration = state.pomodoro.duration > 20 ? state.pomodoro.duration : 25;
+      }
+      
+      const nextTime = nextDuration * 60;
       
       const cycleKey = `${state.pomodoro.mode}-${state.pomodoro.sessionsCompleted}`;
       if (lastNotifiedRef.current !== cycleKey) {
@@ -878,7 +1097,7 @@ export default function App() {
           timeLeft: nextTime, 
           isActive: false,
           sessionsCompleted: isWork ? prev.pomodoro.sessionsCompleted + 1 : prev.pomodoro.sessionsCompleted,
-          totalFocusMinutes: isWork ? prev.pomodoro.totalFocusMinutes + prev.pomodoro.duration : prev.pomodoro.totalFocusMinutes
+          totalFocusMinutes: isWork ? (prev.pomodoro.totalFocusMinutes || 0) + prev.pomodoro.duration : (prev.pomodoro.totalFocusMinutes || 0)
         }
       }));
     }
@@ -957,6 +1176,7 @@ export default function App() {
       if (a.id === 'pomodoro_1' && state.pomodoro.sessionsCompleted >= 1) unlocked = true;
       if (a.id === 'streak_7' && overallStreak >= 7) unlocked = true;
       if (a.id === 'cat_collector' && state.catGallery.length >= 5) unlocked = true;
+      if (a.id === 'cat_level_5' && state.cat.level >= 5) unlocked = true;
 
       if (unlocked) {
         updated = true;
@@ -979,58 +1199,6 @@ export default function App() {
 
   const handleStateChange = (updater: (prev: AppState) => AppState) => {
     setState(prev => updater(prev));
-  };
-
-  // Sound Helper
-  const playSound = (type: 'click' | 'success' | 'pop' | 'tick') => {
-    if (!state.settings.soundEffects) return;
-    
-    try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      
-      const now = ctx.currentTime;
-      
-      if (type === 'click') {
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(400, now);
-        osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-        osc.start(now);
-        osc.stop(now + 0.1);
-      } else if (type === 'success') {
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(523.25, now); // C5
-        osc.frequency.exponentialRampToValueAtTime(659.25, now + 0.1); // E5
-        osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.2); // G5
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-        osc.start(now);
-        osc.stop(now + 0.3);
-      } else if (type === 'pop') {
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(200, now);
-        osc.frequency.exponentialRampToValueAtTime(600, now + 0.05);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
-        osc.start(now);
-        osc.stop(now + 0.05);
-      } else if (type === 'tick') {
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(800, now);
-        gain.gain.setValueAtTime(0.05, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.02);
-        osc.start(now);
-        osc.stop(now + 0.02);
-      }
-    } catch (e) {
-      console.warn('Audio not supported or blocked');
-    }
   };
 
   // --- Toasts ---
@@ -1247,14 +1415,16 @@ export default function App() {
     if (isAIThinking) return;
     setIsAIThinking(true);
     try {
+      const currentState = stateRef.current;
       // Analyze week: Mood, habits, tasks
       const lastWeekDates = [];
-      for(let i=1; i<=7; i++) lastWeekDates.push(isoDate(new Date(Date.now() - i * 86400000)));
+      // Include today if it's Sunday evening
+      for(let i=0; i<7; i++) lastWeekDates.push(isoDate(new Date(Date.now() - i * 86400000)));
       
-      const moods = lastWeekDates.map(d => (state.journalEntries[d] as JournalEntry)?.mood).filter(Boolean);
+      const moods = lastWeekDates.map(d => (currentState.journalEntries[d] as JournalEntry)?.mood).filter(Boolean);
       const avgMood = moods.length ? moods.reduce((a, b) => a! + b!, 0)! / moods.length : 3;
-      const completedTasks = state.tasks.filter(t => t.done && lastWeekDates.includes(t.completedAt || '')).length;
-      const habitCount = state.habits.reduce((acc, h) => acc + h.dates.filter(d => lastWeekDates.includes(d)).length, 0);
+      const completedTasks = currentState.tasks.filter(t => t.done && lastWeekDates.includes(t.completedAt || '')).length;
+      const habitCount = currentState.habits.reduce((acc, h) => acc + h.dates.filter(d => lastWeekDates.includes(d)).length, 0);
 
       const prompt = `Создай образ котика для итога недели. 
       Контекст: Среднее настроение ${avgMood.toFixed(1)}/5, выполнено задач: ${completedTasks}, привычек: ${habitCount}.
@@ -1293,6 +1463,46 @@ export default function App() {
     } catch (err) {
       console.error(err);
       // No toast on auto-gen to avoid annoyance if it fails silently
+    } finally {
+      setIsAIThinking(false);
+    }
+  };
+
+  const extractTasksFromJournal = async () => {
+    if (isAIThinking) return;
+    const entry = state.journalEntries[todayISO()] as JournalEntry;
+    if (!entry?.note?.trim()) {
+      showToast('Сначала напиши что-нибудь в дневник ✨', 'info');
+      return;
+    }
+
+    setIsAIThinking(true);
+    try {
+      const prompt = `Проанализируй следующую запись в дневнике и выдели из неё список конкретных задач (дел), которые нужно сделать. 
+      Запись: "${entry.note}"
+      Отвечай строго валидным JSON массивом объектов: [{"text": "название задачи", "priority": "important" | "urgent" | "someday"}].
+      Если задач нет, верни пустой массив []. Тон задач должен быть бережным.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          systemInstruction: "Ты — ассистент по планированию. Тщательно выделяй конкретные намерения и задачи из текста дневника.",
+        }
+      });
+
+      const tasks = JSON.parse(response.text);
+      if (Array.isArray(tasks) && tasks.length > 0) {
+        tasks.forEach((t: any) => handleAddTask(t.text, t.priority || 'important', todayISO()));
+        showToast(`Бережно добавлено задач: ${tasks.length} 🐾`, 'success');
+        confetti({ particleCount: 30, spread: 30, origin: { y: 0.9 } });
+      } else {
+        showToast('ИИ не нашел новых задач в этой записи', 'info');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('ИИ запнулся, попробуй чуть позже', 'error');
     } finally {
       setIsAIThinking(false);
     }
@@ -1412,14 +1622,135 @@ export default function App() {
         colors: ['#ff5dac', '#c084fc', '#ff8c00']
       });
       playSound('success');
-      const isAllDone = state.habits.every(h => {
+      const isAllDone = state.habits.filter(h => !h.archived).every(h => {
         const isInPrevState = h.dates.includes(today);
         if (h.id === habitId) return true; // We know it's being marked done
         return isInPrevState;
-      }) && state.habits.length > 0;
+      }) && state.habits.filter(h => !h.archived).length > 0;
       showCat(isAllDone);
       gainExp(20);
     }
+  };
+
+  const handleArchiveHabit = (habitId: string) => {
+    playSound('pop');
+    handleStateChange(prev => ({
+      ...prev,
+      habits: prev.habits.map(h => h.id === habitId ? { ...h, archived: true } : h)
+    }));
+    showToast('Привычка заархивирована', 'info');
+  };
+
+  const handleUnarchiveHabit = (habitId: string) => {
+    playSound('pop');
+    handleStateChange(prev => ({
+      ...prev,
+      habits: prev.habits.map(h => h.id === habitId ? { ...h, archived: false } : h)
+    }));
+    showToast('Привычка возвращена из архива', 'success');
+  };
+
+  const handleDeleteHabit = (habitId: string) => {
+    playSound('pop');
+    handleStateChange(prev => ({
+      ...prev,
+      habits: prev.habits.filter(h => h.id !== habitId)
+    }));
+    showToast('Привычка удалена', 'info');
+  };
+
+  // --- Goals Handlers ---
+  const handleSaveGoal = () => {
+    if (!goalName) {
+      showToast('Введи название цели', 'error');
+      return;
+    }
+    
+    handleStateChange(prev => {
+      const newGoal: Goal = {
+        id: editingGoalId || id(),
+        name: goalName,
+        target: goalTarget,
+        unit: goalUnit,
+        deadline: goalDeadline,
+        icon: goalIcon,
+        color: goalColor,
+        step: goalStepValue,
+        progress: editingGoalId ? (prev.goals.find(g => g.id === editingGoalId)?.progress || 0) : 0,
+        history: editingGoalId ? (prev.goals.find(g => g.id === editingGoalId)?.history || []) : [],
+        archived: false
+      };
+
+      if (editingGoalId) {
+        return {
+          ...prev,
+          goals: prev.goals.map(g => g.id === editingGoalId ? newGoal : g)
+        };
+      } else {
+        return {
+          ...prev,
+          goals: [newGoal, ...prev.goals]
+        };
+      }
+    });
+
+    setIsGoalModalOpen(false);
+    setGoalName('');
+    setEditingGoalId(null);
+    setGoalModalStep(1);
+    showToast(editingGoalId ? 'Цель обновлена ✨' : 'Цель поставлена! 🎯', 'success');
+    playSound('success');
+  };
+
+  const handleArchiveGoal = (goalId: string) => {
+    playSound('pop');
+    handleStateChange(prev => ({
+      ...prev,
+      goals: prev.goals.map(g => g.id === goalId ? { ...g, archived: true } : g)
+    }));
+    showToast('Цель сохранена в Зал Славы 🏆', 'success');
+  };
+
+  const handleUnarchiveGoal = (goalId: string) => {
+    playSound('pop');
+    handleStateChange(prev => ({
+      ...prev,
+      goals: prev.goals.map(g => g.id === goalId ? { ...g, archived: false } : g)
+    }));
+    showToast('Цель возвращена в активные', 'success');
+  };
+
+  const handleDeleteGoal = (goalId: string) => {
+    playSound('pop');
+    handleStateChange(prev => ({
+      ...prev,
+      goals: prev.goals.filter(g => g.id !== goalId)
+    }));
+    showToast('Цель удалена', 'info');
+  };
+
+  const openGoalModal = (goal?: Goal) => {
+    if (goal) {
+      setEditingGoalId(goal.id);
+      setGoalName(goal.name);
+      setGoalTarget(goal.target);
+      setGoalUnit(goal.unit);
+      setGoalDeadline(goal.deadline);
+      setGoalIcon(goal.icon || '🎯');
+      setGoalColor(goal.color || '#ff5dac');
+      setGoalStepValue(goal.step || 1);
+    } else {
+      setEditingGoalId(null);
+      setGoalName('');
+      setGoalTarget(100);
+      setGoalUnit('%');
+      setGoalDeadline('');
+      setGoalIcon('🎯');
+      setGoalColor('#ff5dac');
+      setGoalStepValue(1);
+    }
+    setGoalModalStep(1);
+    setIsGoalModalOpen(true);
   };
 
   const handleTaskToggle = (taskId: string) => {
@@ -1430,7 +1761,10 @@ export default function App() {
 
     handleStateChange(prev => ({
       ...prev,
-      tasks: prev.tasks.map(t => t.id === taskId ? { ...t, done: willBeDone, completedAt: willBeDone ? todayISO() : undefined } : t)
+      tasks: prev.tasks.map(t => t.id === taskId ? { ...t, done: willBeDone, completedAt: willBeDone ? todayISO() : undefined } : t),
+      pomodoro: (willBeDone && prev.pomodoro.focusTaskId === taskId) 
+        ? { ...prev.pomodoro, focusTaskId: null } 
+        : prev.pomodoro
     }));
 
     if (willBeDone) {
@@ -1496,6 +1830,7 @@ export default function App() {
       if (nextExp >= requiredExp) {
         nextExp -= requiredExp;
         nextLevel += 1;
+        playSound('purr');
         showToast(`Твой котик вырос! Теперь у него ${nextLevel} уровень! 🐾`, 'success');
         confetti({ particleCount: 200, spread: 80, colors: ['#ff5dac', '#f472b6'] });
       }
@@ -1522,16 +1857,23 @@ export default function App() {
     
     setCatPopup({ show: true, isAllDone, img: '', mood });
     
+    await fetchNextCat();
+  };
+
+  const fetchNextCat = async () => {
     const cat = await fetchRandomCat();
     if (cat) {
       const breed = cat.breeds?.[0];
       const breedName = breed?.name ? `${breed.name} · ${(breed.temperament||'').split(',')[0]}` : undefined;
       setCatPopup(prev => prev ? { ...prev, img: cat.url, breed: breedName } : null);
+    } else {
+      setCatPopup(prev => prev ? { ...prev, img: 'error' } : null);
     }
   };
 
   const saveCatToGallery = (url: string) => {
     if (!url) return;
+    playSound('purr');
     handleStateChange(prev => {
       if (prev.catGallery.includes(url)) return prev;
       return {
@@ -1632,13 +1974,18 @@ export default function App() {
     const activeTask = state.tasks.find(t => t.id === state.pomodoro.focusTaskId);
 
     return (
-      <div className="flex flex-col items-center space-y-10 py-6 max-w-2xl mx-auto">
+      <div className="flex flex-col items-center space-y-12 py-8 max-w-2xl mx-auto">
         {/* Immersive Focus Header */}
-        <div className="text-center space-y-2">
-          <h2 className="text-5xl font-black tracking-tighter font-display bg-gradient-to-r from-primary to-primary-2 bg-clip-text text-transparent">
-            {state.pomodoro.mode === 'work' ? 'Время фокуса 🎯' : 'Время отдыха ✨'}
+        <div className="text-center space-y-3">
+          <h2 className="text-5xl lg:text-7xl font-black tracking-tighter font-display leading-none flex items-center justify-center gap-4">
+            <span className="bg-gradient-to-r from-primary to-primary-2 bg-clip-text text-transparent">
+              {state.pomodoro.mode === 'work' ? 'Время фокуса' : 'Время отдыха'}
+            </span>
+            <span className="text-text">
+              {state.pomodoro.mode === 'work' ? '🎯' : '✨'}
+            </span>
           </h2>
-          <p className="text-muted text-[10px] font-black uppercase tracking-[0.3em] opacity-60">
+          <p className="text-muted text-xs font-black uppercase tracking-[0.4em] opacity-60">
             {state.pomodoro.mode === 'work' ? 'Концентрируйся на важном' : 'Наслаждайся паузой'}
           </p>
         </div>
@@ -1690,7 +2037,7 @@ export default function App() {
         </div>
 
         {/* The Big Timer */}
-        <div className="relative w-80 h-80 lg:w-96 lg:h-96 flex items-center justify-center">
+        <div className="relative w-80 h-80 lg:w-96 lg:h-96 mx-auto">
           {/* Decorative Glow */}
           <motion.div 
             animate={{ 
@@ -1704,7 +2051,7 @@ export default function App() {
             )}
           />
 
-          <svg className="w-full h-full -rotate-90 drop-shadow-xl overflow-visible">
+          <svg className="w-full h-full -rotate-90 drop-shadow-xl overflow-visible" viewBox="0 0 320 320">
             <defs>
               <linearGradient id="timerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" stopColor="var(--primary)" />
@@ -1742,15 +2089,10 @@ export default function App() {
             />
           </svg>
 
-          <div className="absolute flex flex-col items-center">
-            <motion.div 
-              key={state.pomodoro.timeLeft}
-              initial={{ scale: 0.9, opacity: 0.8 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="text-8xl font-black font-mono tracking-tighter tabular-nums drop-shadow-2xl"
-            >
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <div className="text-8xl lg:text-9xl font-black font-mono tracking-tighter tabular-nums drop-shadow-2xl">
               {formatTime(state.pomodoro.timeLeft)}
-            </motion.div>
+            </div>
             <div className={cn(
               "mt-4 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border",
               state.pomodoro.isActive ? "bg-primary/10 border-primary text-primary" : "bg-muted/10 border-line text-muted"
@@ -1760,8 +2102,32 @@ export default function App() {
           </div>
         </div>
 
-        {/* Global Controls */}
         <div className="flex items-center gap-6">
+          <div className="flex flex-col items-center gap-2">
+            <span className="text-[9px] font-black uppercase tracking-widest text-muted opacity-60">Амбиент</span>
+            <div className="flex bg-surface-2 p-1 rounded-2xl border border-line">
+              {[
+                { id: 'none', icon: '🔇' },
+                { id: 'cyber', icon: '🤖' },
+                { id: 'space', icon: '🪐' },
+                { id: 'rain', icon: '🌧️' }
+              ].map(a => (
+                <button
+                  key={a.id}
+                  onClick={() => handleStateChange(prev => ({ ...prev, pomodoro: { ...prev.pomodoro, ambientType: a.id as any } }))}
+                  className={cn(
+                    "w-10 h-10 flex items-center justify-center rounded-xl transition-all",
+                    state.pomodoro.ambientType === a.id ? "bg-primary text-white shadow-sm" : "hover:bg-surface"
+                  )}
+                >
+                  {a.icon}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="h-10 w-px bg-line/40 mx-2" />
+
           <button 
             className="chip-btn p-5 rounded-3xl hover:bg-bg-soft"
             onClick={resetPomodoro}
@@ -1838,7 +2204,9 @@ export default function App() {
             <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center mb-3">
               <Sparkles size={20} />
             </div>
-            <div className="text-3xl font-black">{Math.floor(state.pomodoro.totalFocusMinutes / 60)}ч {state.pomodoro.totalFocusMinutes % 60}м</div>
+            <div className="text-3xl font-black">
+              {Math.floor((state.pomodoro.totalFocusMinutes || 0) / 60)}ч {(state.pomodoro.totalFocusMinutes || 0) % 60}м
+            </div>
             <div className="text-[10px] font-bold text-muted uppercase tracking-widest mt-1">Время в фокусе (всего)</div>
           </div>
         </div>
@@ -1858,8 +2226,8 @@ export default function App() {
     return (
       <div className="space-y-10">
         <div className="section-header px-2">
-          <h3 className="text-3xl font-black tracking-tight font-display text-text">Колесо баланса 🎡</h3>
-          <p className="text-[10px] text-muted font-black uppercase tracking-[0.2em] mt-1 opacity-60">Гармония во всех сферах твоей жизни</p>
+          <h3 className="text-4xl lg:text-5xl font-black tracking-tighter font-display text-text leading-none">Колесо баланса 🎡</h3>
+          <p className="text-xs text-muted font-black uppercase tracking-[0.2em] mt-2 opacity-60">Гармония во всех сферах твоей жизни</p>
         </div>
 
         <div className="card relative flex flex-col items-center justify-center py-20 overflow-hidden bg-gradient-to-br from-surface via-surface to-primary-soft/10 border-line/40 shadow-xl shadow-primary/5 rounded-[40px]">
@@ -2098,97 +2466,225 @@ export default function App() {
   };
 
 
-  const renderGoals = () => (
-    <div className="space-y-6">
-      <div className="card pattern-stars">
-        <h3 className="text-lg font-bold mb-4">Новая цель</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <input id="goalName" className="p-3 rounded-xl bg-surface-2 border border-line" placeholder="Название цели" />
-          <input id="goalTarget" type="number" className="p-3 rounded-xl bg-surface-2 border border-line" placeholder="Целевое значение" />
-          <input id="goalUnit" className="p-3 rounded-xl bg-surface-2 border border-line" placeholder="ед., %, стр." />
-          <input id="goalDeadline" type="date" className="p-3 rounded-xl bg-surface-2 border border-line" />
-        </div>
-        <button 
-          className="btn w-full mt-4"
-          onClick={() => {
-            const name = (document.getElementById('goalName') as HTMLInputElement).value.trim();
-            const target = +(document.getElementById('goalTarget') as HTMLInputElement).value || 100;
-            const unit = (document.getElementById('goalUnit') as HTMLInputElement).value.trim();
-            const deadline = (document.getElementById('goalDeadline') as HTMLInputElement).value || '';
-            if (!name) return;
-            handleStateChange(prev => ({
-              ...prev,
-              goals: [{ id: id(), name, progress: 0, target, unit, deadline, history: [] }, ...prev.goals]
-            }));
-            showToast('Цель поставлена! 🎯', 'success');
-          }}
-        >
-          Добавить цель
-        </button>
-      </div>
+  const renderGoals = () => {
+    const activeGoals = state.goals.filter(g => !g.archived);
+    const archivedGoals = state.goals.filter(g => g.archived);
+    const visibleGoals = showArchivedGoals ? archivedGoals : activeGoals;
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {state.goals.map(g => {
-          const pct = Math.max(0, Math.min(100, (g.progress / g.target) * 100 || 0));
-          return (
-            <div key={g.id} className="card space-y-4">
-              <div className="flex justify-between items-start">
-                <div>
-                  <div className="font-bold text-lg">{g.name}</div>
-                  <div className="text-xs text-muted">Дедлайн: {g.deadline || '—'}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="tag">{g.progress}/{g.target} {g.unit}</span>
-                  <button 
-                    className="p-2 text-bad hover:bg-bad/10 rounded-lg"
-                    onClick={() => handleStateChange(prev => ({ ...prev, goals: prev.goals.filter(x => x.id !== g.id) }))}
-                  >
-                    <Trash2 size={16} />
+    return (
+      <div className="space-y-10">
+        <div className="section-header flex flex-col sm:flex-row justify-between items-start sm:items-end px-2 gap-4">
+          <div className="space-y-2">
+            <h3 className="text-4xl lg:text-5xl font-black tracking-tighter font-display leading-none">
+              {showArchivedGoals ? 'Зал Славы 🏆' : 'Твои цели 🎯'}
+            </h3>
+            <p className="text-xs text-muted font-black uppercase tracking-[0.2em] opacity-60">
+              {showArchivedGoals ? 'Твои великие достижения' : 'Масштабное видение будущего'}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+             <button 
+              className={cn(
+                "chip-btn py-4 px-6 text-xs font-bold transition-all flex items-center gap-2",
+                showArchivedGoals ? "bg-primary text-white" : "text-muted hover:text-primary"
+              )}
+              onClick={() => setShowArchivedGoals(!showArchivedGoals)}
+            >
+              {showArchivedGoals ? <History size={16} /> : <Award size={16} />}
+              {showArchivedGoals ? 'К активным' : 'Зал славы'}
+              {archivedGoals.length > 0 && !showArchivedGoals && (
+                <span className="bg-primary-soft text-primary px-1.5 py-0.5 rounded-full text-[9px] -mr-2">
+                  {archivedGoals.length}
+                </span>
+              )}
+            </button>
+            {!showArchivedGoals && (
+              <button 
+                className="chip-btn py-4 px-8 shadow-sm hover:shadow-lg transition-all flex items-center gap-3 border-primary/20 text-primary font-bold text-xs"
+                onClick={() => openGoalModal()}
+              >
+                <Plus size={18} /> Добавить цель
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <AnimatePresence mode="popLayout">
+            {visibleGoals.map(g => {
+              const pct = Math.max(0, Math.min(100, (g.progress / g.target) * 100 || 0));
+              const goalColor = g.color || '#ff5dac';
+              const daysLeft = g.deadline ? Math.ceil((new Date(g.deadline).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)) : null;
+              const remaining = Math.max(0, g.target - g.progress);
+              const perDay = (daysLeft && daysLeft > 0) ? (remaining / daysLeft).toFixed(1) : null;
+
+              return (
+                <motion.div 
+                  key={g.id}
+                  layout
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="card p-6 space-y-6 relative overflow-hidden group border-line hover:border-primary/40 transition-all hover:shadow-xl"
+                  style={{ '--goal-color': goalColor } as any}
+                >
+                  <div className="flex justify-between items-start relative z-10">
+                    <div className="flex gap-4">
+                      <div 
+                        className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shadow-sm glass border border-line/50"
+                        style={{ backgroundColor: `${goalColor}20`, color: goalColor }}
+                      >
+                        {g.icon || '🎯'}
+                      </div>
+                      <div className="space-y-1">
+                        <div className="font-black text-xl tracking-tight leading-none">{g.name}</div>
+                        <div className="flex items-center gap-2">
+                           <span className="text-[10px] font-black uppercase tracking-widest text-muted opacity-60">
+                             {g.deadline ? `Дедлайн: ${g.deadline}` : 'Бессрочно'}
+                           </span>
+                           {daysLeft !== null && daysLeft <= 7 && daysLeft > 0 && (
+                             <span className="bg-bad/10 text-bad px-1.5 py-0.5 rounded-full text-[8px] font-black uppercase animate-pulse">
+                               Срочно
+                             </span>
+                           )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {!g.archived ? (
+                         <>
+                          <button 
+                            className="p-2 text-muted hover:text-primary hover:bg-bg-soft rounded-xl transition-all"
+                            onClick={() => openGoalModal(g)}
+                          >
+                            <Pencil size={18} />
+                          </button>
+                          <button 
+                            className="p-2 text-muted hover:text-primary hover:bg-bg-soft rounded-xl transition-all"
+                            onClick={() => handleArchiveGoal(g.id)}
+                            title="В Зал Славы"
+                          >
+                            <Archive size={18} />
+                          </button>
+                        </>
+                      ) : (
+                        <button 
+                          className="p-2 text-muted hover:text-primary hover:bg-bg-soft rounded-xl transition-all"
+                          onClick={() => handleUnarchiveGoal(g.id)}
+                          title="Восстановить"
+                        >
+                          <ArchiveRestore size={18} />
+                        </button>
+                      )}
+                      <button 
+                        className="p-2 text-muted hover:text-bad hover:bg-bad/10 rounded-xl transition-all"
+                        onClick={() => handleDeleteGoal(g.id)}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 relative z-10">
+                    <div className="flex justify-between items-end text-sm font-black uppercase tracking-wider">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl font-mono" style={{ color: goalColor }}>{g.progress}</span>
+                        <span className="text-muted opacity-60">/ {g.target} {g.unit}</span>
+                      </div>
+                      <div className="text-muted">{Math.round(pct)}%</div>
+                    </div>
+                    
+                    <div className="h-4 w-full bg-surface-2 rounded-full overflow-hidden border border-line/30 p-0.5">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        className="h-full rounded-full shadow-glow"
+                        style={{ backgroundColor: goalColor }}
+                        transition={{ type: 'spring', bounce: 0.2, duration: 1 }}
+                      />
+                    </div>
+                  </div>
+
+                  {!g.archived && (
+                    <div className="flex items-center gap-3 relative z-10">
+                      <div className="flex bg-surface-2 p-1 rounded-2xl border border-line/50">
+                        <button 
+                          className="w-10 h-10 flex items-center justify-center hover:bg-white dark:hover:bg-bg rounded-xl transition-all text-xl font-bold"
+                          onClick={() => handleStateChange(prev => ({
+                            ...prev,
+                            goals: prev.goals.map(x => x.id === g.id ? { ...x, progress: Math.max(0, x.progress - (g.step || 1)) } : x)
+                          }))}
+                        >
+                          −
+                        </button>
+                        <div className="px-4 flex items-center justify-center font-black min-w-[60px] text-xs">
+                          шаг: {g.step || 1}
+                        </div>
+                        <button 
+                          className="w-10 h-10 flex items-center justify-center hover:bg-white dark:hover:bg-bg rounded-xl transition-all text-xl font-bold"
+                          onClick={() => {
+                            const goal = state.goals.find(x => x.id === g.id);
+                            if (!goal) return;
+                            const nextProgress = Math.min(goal.target, goal.progress + (g.step || 1));
+                            handleStateChange(prev => ({
+                              ...prev,
+                              goals: prev.goals.map(x => x.id === g.id ? { ...x, progress: nextProgress } : x)
+                            }));
+                            if (nextProgress >= goal.target && goal.progress < goal.target) {
+                              showToast('Цель достигнута! 🎉', 'success');
+                              confetti({ particleCount: 150, spread: 80, colors: [goalColor, '#ffffff'] });
+                            }
+                          }}
+                        >
+                          +
+                        </button>
+                      </div>
+                      
+                      <div className="flex-1 flex flex-col items-end gap-1">
+                        {perDay && parseFloat(perDay) > 0 && (
+                          <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-primary">
+                            <TrendingUp size={12} /> {perDay} {g.unit} в день
+                          </div>
+                        )}
+                        <div className="text-[9px] text-muted font-bold opacity-60 uppercase">
+                          {pct === 100 ? 'Цель завершена!' : `Осталось ${remaining} ${g.unit}`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Icon Watermark */}
+                  <div className="absolute -right-4 -bottom-4 text-9xl opacity-[0.04] rotate-12 group-hover:rotate-0 group-hover:scale-110 transition-all duration-700 pointer-events-none">
+                    {g.icon || '🎯'}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+          
+          {visibleGoals.length === 0 && (
+            <div className="col-span-full py-20">
+               <EmptyState 
+                icon={showArchivedGoals ? "🏆" : "🎯"} 
+                title={showArchivedGoals ? "Зал Славы пуст" : "Целей пока нет"} 
+                text={showArchivedGoals ? "Твои великие победы будут храниться здесь!" : "Поставь свою первую большую цель и иди к ней маленькими шагами 🌱"} 
+              />
+              {!showArchivedGoals && (
+                <div className="flex justify-center mt-8">
+                  <button className="btn px-10" onClick={() => openGoalModal()}>
+                    Поставить цель
                   </button>
                 </div>
-              </div>
-              <div className="progress">
-                <span style={{ width: `${pct}%` }}></span>
-              </div>
-              <div className="flex items-center gap-3">
-                <button 
-                  className="chip-btn px-4"
-                  onClick={() => handleStateChange(prev => ({
-                    ...prev,
-                    goals: prev.goals.map(x => x.id === g.id ? { ...x, progress: Math.max(0, x.progress - 1) } : x)
-                  }))}
-                >
-                  −
-                </button>
-                <button 
-                  className="chip-btn px-4"
-                  onClick={() => {
-                    const goal = state.goals.find(x => x.id === g.id);
-                    if (!goal) return;
-                    const nextProgress = Math.min(goal.target, goal.progress + 1);
-                    handleStateChange(prev => ({
-                      ...prev,
-                      goals: prev.goals.map(x => x.id === g.id ? { ...x, progress: nextProgress } : x)
-                    }));
-                    if (nextProgress >= goal.target && goal.progress < goal.target) {
-                      showToast('Цель достигнута! 🎉', 'success');
-                    }
-                  }}
-                >
-                  +
-                </button>
-                <div className="text-xs text-muted flex-1 text-right">
-                  {pct === 100 ? 'Цель достигнута!' : `Осталось ${g.target - g.progress} ${g.unit}`}
-                </div>
-              </div>
+              )}
             </div>
-          );
-        })}
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderCalendar = () => {
+    const today = new Date();
     const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
     const startOffset = (new Date(viewDate.getFullYear(), viewDate.getMonth(), 1).getDay() + 6) % 7;
 
@@ -2198,59 +2694,192 @@ export default function App() {
       days.push(d);
     }
 
+    // Monthly Mood Stats Logic
+    const currentMonthEntries = Object.entries(state.journalEntries).filter(([date, entry]) => {
+      const d = new Date(date);
+      return d.getMonth() === viewDate.getMonth() && d.getFullYear() === viewDate.getFullYear() && (entry as JournalEntry).mood;
+    });
+    
+    const moodSum = currentMonthEntries.reduce((acc, [_, entry]) => acc + ((entry as JournalEntry).mood || 0), 0);
+    const avgMood = currentMonthEntries.length > 0 ? (moodSum / currentMonthEntries.length).toFixed(1) : null;
+    const avgEmoji = avgMood ? MOOD_SCALE.find(m => m.v === Math.round(Number(avgMood)))?.e : '—';
+
     return (
-      <div className="card">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-bold">Календарь 🗓️</h3>
-          <div className="flex items-center gap-2">
-            <button className="chip-btn" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))}><ChevronLeft size={18} /></button>
-            <span className="font-bold min-w-[120px] text-center">{viewDate.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}</span>
-            <button className="chip-btn" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))}><ChevronRight size={18} /></button>
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="space-y-1">
+            <h3 className="text-3xl font-black font-display tracking-tight">Календарь 🗓️</h3>
+            <p className="text-[10px] text-muted font-black uppercase tracking-widest opacity-60">Твоя личная карта времени</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-3">
+             {avgMood && (
+               <div className="bg-surface-2 px-4 py-2 rounded-2xl border border-line/40 flex items-center gap-3 shadow-inner">
+                 <div className="text-2xl">{avgEmoji}</div>
+                 <div className="text-left">
+                   <div className="text-[9px] font-black uppercase tracking-wider text-muted">Среднее настроение</div>
+                   <div className="text-sm font-black text-primary">{avgMood} / 5.0</div>
+                 </div>
+               </div>
+             )}
+             <div className="flex items-center gap-2 bg-surface-2 p-1.5 rounded-2xl border border-line/40 shadow-sm relative z-50">
+                <button 
+                  type="button"
+                  className="chip-btn py-2 px-3 relative z-50 cursor-pointer active:scale-95 transition-transform" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1));
+                    playSound('click');
+                  }}
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <div className="px-4 font-black text-xs uppercase tracking-widest min-w-[140px] text-center select-none">
+                  {viewDate.toLocaleString('ru-RU', { month: 'long', year: 'numeric' })}
+                </div>
+                <button 
+                  type="button"
+                  className="chip-btn py-2 px-3 relative z-50 cursor-pointer active:scale-95 transition-transform" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1));
+                    playSound('click');
+                  }}
+                >
+                  <ChevronRight size={18} />
+                </button>
+             </div>
+             <button 
+               type="button"
+               className="chip-btn py-3.5 px-6 font-black uppercase text-[10px] tracking-widest border-primary/20 text-primary hover:bg-primary-soft/10 relative z-50 cursor-pointer active:scale-95 transition-transform"
+               onClick={(e) => {
+                 e.preventDefault();
+                 e.stopPropagation();
+                 setViewDate(new Date());
+                 playSound('pop');
+               }}
+             >
+               Сегодня
+             </button>
           </div>
         </div>
-        <div className="grid grid-cols-7 gap-1">
-          {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map(d => (
-            <div key={d} className="text-center text-[10px] font-bold text-muted py-2">{d}</div>
-          ))}
-          {days.map((d, i) => {
-            const iso = isoDate(d);
-            const isToday = iso === todayISO();
-            const isOtherMonth = d.getMonth() !== viewDate.getMonth();
-            const entry = state.journalEntries[iso];
-            const habitsCount = state.habits.filter(h => h.dates.includes(iso)).length;
 
-            return (
-              <button 
-                key={i}
-                onClick={() => { setSelectedDate(iso); setIsDayModalOpen(true); }}
-                className={cn(
-                  "aspect-square rounded-xl border border-line p-1 flex flex-col justify-between items-start transition-all",
-                  isOtherMonth ? "opacity-20" : "hover:bg-surface-2",
-                  isToday && "border-primary ring-1 ring-primary/30"
-                )}
-              >
-                <span className="text-xs font-bold">{d.getDate()}</span>
-                <div className="flex flex-wrap gap-0.5">
-                  {entry?.mood && <div className="w-1.5 h-1.5 rounded-full bg-good" />}
-                  {habitsCount > 0 && <div className="w-1.5 h-1.5 rounded-full bg-primary" />}
-                  {entry?.note && <div className="w-1.5 h-1.5 rounded-full bg-primary-2" />}
-                </div>
-              </button>
-            );
-          })}
+        <div className="card p-6 border-line/40 shadow-xl overflow-x-auto">
+          <div className="min-w-[700px]">
+            <div className="grid grid-cols-7 gap-3 mb-4">
+              {['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'].map(d => (
+                <div key={d} className="text-center text-[10px] font-black uppercase tracking-[0.2em] text-muted py-2">{d}</div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7 gap-3 touch-manipulation">
+              {days.map((d, i) => {
+                const iso = isoDate(d);
+                const isToday = iso === todayISO();
+                const isOtherMonth = d.getMonth() !== viewDate.getMonth();
+                const entry = state.journalEntries[iso] as JournalEntry;
+                const dailyHabits = state.habits.filter(h => h.dates.includes(iso));
+                const moodEmoji = entry?.mood ? MOOD_SCALE.find(m => m.v === entry.mood)?.e : null;
+                
+                // Goal Deadlines on this day
+                const deadlines = state.goals.filter(g => g.deadline === iso);
+
+                return (
+                  <button 
+                    key={i}
+                    type="button"
+                    onClick={(e) => { 
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSelectedDate(iso); 
+                      setIsDayModalOpen(true); 
+                      playSound('click'); 
+                    }}
+                    className={cn(
+                      "aspect-video md:aspect-square rounded-[24px] border p-2 flex flex-col justify-between items-start transition-all relative group overflow-hidden cursor-pointer touch-none",
+                      isOtherMonth ? "opacity-20 bg-surface-2/50 border-line/10" : "bg-surface border-line/50 hover:border-primary/50 hover:shadow-lg hover:bg-surface-2",
+                      isToday && "border-primary ring-4 ring-primary/10 bg-primary-soft/5"
+                    )}
+                    style={{ zIndex: isToday ? 30 : 20 }}
+                  >
+                    <div className="flex justify-between items-start w-full relative z-10 pointer-events-none">
+                      <span className={cn(
+                        "text-xs font-black p-1 leading-none rounded-lg",
+                        isToday ? "bg-primary text-white" : "text-muted opacity-60"
+                      )}>
+                        {d.getDate()}
+                      </span>
+                      
+                      <div className="flex flex-col gap-1 items-end">
+                        {moodEmoji && (
+                          <div className="text-lg leading-none animate-in fade-in zoom-in duration-300">
+                            {moodEmoji}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="w-full flex flex-wrap gap-1 relative z-10 pointer-events-none">
+                      {deadlines.length > 0 && (
+                        <div className="flex -space-x-2">
+                           {deadlines.map(g => (
+                             <div 
+                               key={g.id} 
+                               className="w-6 h-6 rounded-full flex items-center justify-center text-xs shadow-sm border border-white dark:border-bg animate-bounce"
+                               style={{ backgroundColor: g.color || '#ff5dac' }}
+                               title={`Дедлайн: ${g.name}`}
+                             >
+                               {g.icon || '🎯'}
+                             </div>
+                           ))}
+                        </div>
+                      )}
+                      
+                      {dailyHabits.length > 0 && (
+                        <div className="flex flex-1 justify-end items-end gap-0.5">
+                           {dailyHabits.slice(0, 3).map(h => (
+                             <div key={h.id} className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+                           ))}
+                           {dailyHabits.length > 3 && <span className="text-[8px] font-black text-primary opacity-60">+{dailyHabits.length - 3}</span>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Subtle mood tint */}
+                    {entry?.mood && (
+                       <div 
+                         className="absolute inset-0 opacity-[0.03] transition-opacity group-hover:opacity-[0.07] pointer-events-none"
+                         style={{ backgroundColor: 
+                           entry.mood >= 4 ? '#10b981' : 
+                           entry.mood >= 3 ? '#ff5dac' : 
+                           '#6366f1' 
+                         }}
+                       />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
     );
   };
 
   const renderCatGallery = () => (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center bg-surface-2 p-6 rounded-[32px] border border-line/40">
+    <div className="space-y-10">
+      <div className="section-header px-2">
+        <h3 className="text-4xl lg:text-5xl font-black tracking-tighter font-display text-text leading-none">Моя галерея 🐈</h3>
+        <p className="text-xs text-muted font-black uppercase tracking-[0.2em] mt-2 opacity-60">История твоих достижений в котиках</p>
+      </div>
+
+      <div className="flex justify-between items-center bg-surface-2 p-6 rounded-[40px] border border-line/40 glass">
         <div>
-          <h3 className="text-2xl font-black text-primary flex items-center gap-3">Кошачья Галерея 🐈</h3>
+          <h3 className="text-2xl font-black text-primary flex items-center gap-3 font-display">Кошачья Галерея</h3>
           <p className="text-muted text-sm mt-1">Твои пушистые награды за продуктивность</p>
         </div>
-        <div className="bg-primary/10 text-primary border border-primary/20 px-6 py-3 rounded-2xl font-black text-lg shadow-sm">
+        <div className="bg-primary/10 text-primary border border-primary/20 px-8 py-4 rounded-3xl font-black text-2xl shadow-sm">
           {state.catGallery.length}
         </div>
       </div>
@@ -2403,7 +3032,7 @@ export default function App() {
             <h3 className="text-lg font-bold mb-4">Бережная поддержка ✨</h3>
             <div className="space-y-3">
               <div className="insight">
-                {overallStreak > 3 ? `Ты держишь ритм уже ${overallStreak} дня! Это потрясающе.` : "Каждый новый день — это шанс начать заново. Я верю в тебя!"}
+                {overallStreak > 3 ? `Ты держишь ритм уже ${overallStreak} ${pluralize(overallStreak, ['день', 'дня', 'дней'])}! Это потрясающе.` : "Каждый новый день — это шанс начать заново. Я верю в тебя!"}
               </div>
               <div className="insight bg-accent/10 border-accent/20">
                 {state.tasks.filter(t => t.done).length > 0 ? "Ты продуктивна! Завершённые задачи — это повод для гордости." : "Не спеши, выбери одну маленькую задачу на сегодня."}
@@ -2439,24 +3068,28 @@ export default function App() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="card pattern-stars flex flex-col items-center text-center">
-          <div className="text-[10px] font-black uppercase tracking-widest text-muted mb-4">Серия 🔥</div>
-          <div className="text-5xl font-black text-primary tracking-tighter mb-2">{overallStreak}</div>
-          <div className="text-muted text-xs font-bold uppercase tracking-wider">дней с ритмом</div>
-        </div>
-        <div className="card pattern-dots flex flex-col items-center text-center">
-          <div className="text-[10px] font-black uppercase tracking-widest text-muted mb-4">Привычки сегодня 🌱</div>
-          <div className="text-5xl font-black text-primary-2 tracking-tighter mb-2">
+          <div className="card glass pattern-stars flex flex-col items-center text-center p-10 bg-gradient-to-br from-primary/5 to-transparent border-primary/10 shadow-xl shadow-primary/5">
+            <div className="text-[10px] font-black uppercase tracking-widest text-primary mb-4 opacity-60">Серия 🔥</div>
+            <div className="text-6xl font-black text-primary tracking-tighter mb-2 font-display">
+              {overallStreak}
+            </div>
+            <div className="text-primary/60 text-[10px] font-black uppercase tracking-widest">
+              {pluralize(overallStreak, ['день', 'дня', 'дней'])} с ритмом
+            </div>
+          </div>
+        <div className="card glass pattern-dots flex flex-col items-center text-center p-10 bg-gradient-to-br from-primary-2/5 to-transparent border-primary-2/10 shadow-xl shadow-primary-2/5">
+          <div className="text-[10px] font-black uppercase tracking-widest text-primary-2 mb-4 opacity-60">Привычки сегодня 🌱</div>
+          <div className="text-6xl font-black text-primary-2 tracking-tighter mb-2 font-display">
             {state.habits.filter(h => h.dates.includes(todayISO())).length}/{state.habits.length}
           </div>
-          <div className="text-muted text-xs font-bold uppercase tracking-wider">маленьких побед</div>
+          <div className="text-primary-2/60 text-[10px] font-black uppercase tracking-widest">маленьких побед</div>
         </div>
-        <div className="card pattern-waves flex flex-col items-center text-center">
-          <div className="text-[10px] font-black uppercase tracking-widest text-muted mb-4">Фокус дня 🎯</div>
-          <div className="text-5xl font-black text-accent tracking-tighter mb-2">
+        <div className="card glass pattern-waves flex flex-col items-center text-center p-10 bg-gradient-to-br from-accent/5 to-transparent border-accent/10 shadow-xl shadow-accent/5">
+          <div className="text-[10px] font-black uppercase tracking-widest text-accent mb-4 opacity-60">Фокус дня 🎯</div>
+          <div className="text-6xl font-black text-accent tracking-tighter mb-2 font-display">
             {state.tasks.filter(t => t.focus && !t.done).length}
           </div>
-          <div className="text-muted text-xs font-bold uppercase tracking-wider">главные задачи</div>
+          <div className="text-accent/60 text-[10px] font-black uppercase tracking-widest">главные задачи</div>
         </div>
       </div>
 
@@ -2480,11 +3113,17 @@ export default function App() {
           </h3>
           <div className="p-6 rounded-2xl bg-primary-soft/30 border border-primary/10">
             <div className="text-sm font-bold text-text leading-relaxed">
-              За 7 последних дней вы успешно закрепили <span className="text-primary font-black uppercase tracking-widest underline decoration-2 underline-offset-4">{state.habits.reduce((acc, h) => acc + h.dates.filter(d => {
+              За 7 последних дней ты успешно закрепила <span className="text-primary font-black uppercase tracking-widest underline decoration-2 underline-offset-4">
+                {state.habits.reduce((acc, h) => acc + h.dates.filter(d => {
+                  const date = new Date(d);
+                  const now = new Date();
+                  return (now.getTime() - date.getTime()) < 7 * 24 * 60 * 60 * 1000;
+                }).length, 0)}
+              </span> {pluralize(state.habits.reduce((acc, h) => acc + h.dates.filter(d => {
                 const date = new Date(d);
                 const now = new Date();
                 return (now.getTime() - date.getTime()) < 7 * 24 * 60 * 60 * 1000;
-              }).length, 0)}</span> привычек. Ваше среднее настроение составляет 4.2 из 5.
+              }).length, 0), ['привычку', 'привычки', 'привычек'])}. Твое среднее настроение составляет 4.2 из 5.
             </div>
           </div>
         </div>
@@ -2538,9 +3177,11 @@ export default function App() {
                   </div>
                 ))
               ) : (
-                <div className="py-6 text-center text-muted text-xs italic opacity-50">
-                  Нет активных задач на сегодня ✨
-                </div>
+                <EmptyState 
+                  icon="✨" 
+                  title="Все задачи выполнены!" 
+                  text="Прекрасная работа. Ты заслужила отдых или чашечку чая." 
+                />
               )}
             </div>
           </div>
@@ -2565,9 +3206,11 @@ export default function App() {
                 </div>
               </div>
             )) : (
-              <div className="text-center py-12 text-muted text-sm italic opacity-50">
-                Добавь цели в настройках, чтобы видеть прогноз ✨
-              </div>
+              <EmptyState 
+                icon="🏔️" 
+                title="Горизонты чисты" 
+                text="Поставь свою первую большую цель, чтобы видеть путь вперед." 
+              />
             )}
           </div>
         </div>
@@ -2575,57 +3218,132 @@ export default function App() {
     </div>
   );
 
-  const renderHabits = () => (
-    <div className="space-y-10">
-      <div className="section-header flex justify-between items-end px-2">
-        <div className="space-y-1">
-          <h3 className="text-3xl font-black tracking-tight font-display">Привычки 🌱</h3>
-          <p className="text-[10px] text-muted font-black uppercase tracking-[0.2em] opacity-60">Ритм создает дисциплину</p>
-        </div>
-        <button className="chip-btn py-3 px-6 shadow-sm hover:shadow-md transition-all flex items-center gap-2 border-primary/20 text-primary font-bold text-xs" onClick={() => setIsHabitModalOpen(true)}>
-          <Plus size={16} /> Добавить
-        </button>
-      </div>
+  const renderHabits = () => {
+    const activeHabits = state.habits.filter(h => !h.archived);
+    const archivedHabits = state.habits.filter(h => h.archived);
+    const visibleHabits = showArchivedHabits ? archivedHabits : activeHabits;
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {state.habits.map(habit => (
-          <div key={habit.id} className="habit-row flex items-center justify-between p-6 rounded-[32px] bg-surface border border-line hover:border-primary/40 transition-all hover:shadow-lg group relative overflow-hidden">
-            {/* Visual Flair */}
-            <div className="absolute -right-2 -bottom-2 text-6xl opacity-[0.03] group-hover:scale-125 transition-transform duration-700 pointer-events-none">{habit.icon}</div>
-            
-            <div className="flex items-center gap-4 relative z-10">
-              <div className="w-16 h-16 rounded-2xl bg-bg-soft group-hover:bg-primary-soft flex items-center justify-center text-3xl transition-colors shadow-sm">
-                {habit.icon}
-              </div>
-              <div className="space-y-1">
-                <div className="font-black text-sm tracking-tight">{habit.name}</div>
-                <div className="text-[10px] text-muted font-black uppercase tracking-[0.1em] opacity-60 flex items-center gap-1">
-                  <Flame size={12} className="text-orange-500" /> Серия: {streakForHabit(habit)} дн.
-                </div>
-              </div>
-            </div>
+    return (
+      <div className="space-y-10">
+        <div className="section-header flex flex-col sm:flex-row justify-between items-start sm:items-end px-2 gap-4">
+          <div className="space-y-2">
+            <h3 className="text-4xl lg:text-5xl font-black tracking-tighter font-display leading-none">
+              {showArchivedHabits ? 'Архив привычек 📂' : 'Привычки 🌱'}
+            </h3>
+            <p className="text-xs text-muted font-black uppercase tracking-[0.2em] opacity-60">
+              {showArchivedHabits ? 'Твои прошлые победы' : 'Ритм создает дисциплину'}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
             <button 
-              onClick={() => handleHabitComplete(habit.id)}
               className={cn(
-                "dot w-10 h-10 border-2 relative z-10",
-                habit.dates.includes(todayISO()) && "done"
+                "chip-btn py-4 px-6 text-xs font-bold transition-all flex items-center gap-2",
+                showArchivedHabits ? "bg-primary text-white" : "text-muted hover:text-primary"
               )}
-            />
+              onClick={() => setShowArchivedHabits(!showArchivedHabits)}
+            >
+              {showArchivedHabits ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+              {showArchivedHabits ? 'К активным' : 'Архив'}
+              {archivedHabits.length > 0 && !showArchivedHabits && (
+                <span className="bg-primary-soft text-primary px-1.5 py-0.5 rounded-full text-[9px] -mr-2">
+                  {archivedHabits.length}
+                </span>
+              )}
+            </button>
+            {!showArchivedHabits && (
+              <button className="chip-btn py-4 px-8 shadow-sm hover:shadow-lg transition-all flex items-center gap-3 border-primary/20 text-primary font-bold text-xs" onClick={() => setIsHabitModalOpen(true)}>
+                <Plus size={18} /> Добавить
+              </button>
+            )}
           </div>
-        ))}
-        {state.habits.length === 0 && (
-          <div className="col-span-full card border-dashed border-2 py-20 flex flex-col items-center justify-center text-center bg-transparent">
-             <div className="text-6xl mb-6 grayscale opacity-20">🌱</div>
-             <div className="max-w-xs space-y-2">
-               <p className="font-black text-lg">Здесь пока пусто</p>
-               <p className="text-sm text-muted">Добавь свою первую привычку, чтобы начать строить ритм жизни ✨</p>
-             </div>
-             <button className="btn mt-8 px-10" onClick={() => setIsHabitModalOpen(true)}>Начать</button>
-          </div>
-        )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <AnimatePresence mode="popLayout">
+            {visibleHabits.map(habit => (
+              <motion.div 
+                key={habit.id}
+                layout
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="habit-row flex items-center justify-between p-6 rounded-[32px] bg-surface border border-line hover:border-primary/40 transition-all hover:shadow-lg group relative overflow-hidden"
+              >
+                {/* Visual Flair */}
+                <div className="absolute -right-2 -bottom-2 text-6xl opacity-[0.03] group-hover:scale-125 transition-transform duration-700 pointer-events-none">{habit.icon}</div>
+                
+                <div className="flex items-center gap-4 relative z-10">
+                  <div className={cn(
+                    "w-16 h-16 rounded-2xl flex items-center justify-center text-3xl transition-all shadow-sm",
+                    habit.archived ? "bg-surface-2 opacity-50 grayscale" : "bg-bg-soft group-hover:bg-primary-soft"
+                  )}>
+                    {habit.icon}
+                  </div>
+                  <div className="space-y-1">
+                    <div className={cn("font-black text-sm tracking-tight", habit.archived && "text-muted")}>{habit.name}</div>
+                    <div className="text-[10px] text-muted font-black uppercase tracking-[0.1em] opacity-60 flex items-center gap-1">
+                      <Flame size={12} className={cn(habit.archived ? "text-muted" : "text-orange-500")} /> Серия: {streakForHabit(habit)} {pluralize(streakForHabit(habit), ['день', 'дня', 'дней'])}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 relative z-10">
+                  {!habit.archived ? (
+                    <>
+                      <button 
+                        onClick={() => handleArchiveHabit(habit.id)}
+                        className="p-2 text-muted hover:text-primary transition-colors hover:bg-primary-soft rounded-xl"
+                        title="В архив"
+                      >
+                        <Archive size={18} />
+                      </button>
+                      <button 
+                        onClick={() => handleHabitComplete(habit.id)}
+                        className={cn(
+                          "dot w-10 h-10 border-2",
+                          habit.dates.includes(todayISO()) && "done"
+                        )}
+                      />
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                       <button 
+                        onClick={() => handleUnarchiveHabit(habit.id)}
+                        className="chip-btn px-4 py-2 text-[10px] font-black uppercase"
+                      >
+                        Восстановить
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteHabit(habit.id)}
+                        className="p-2 text-bad hover:bg-bad/10 rounded-xl"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+          
+          {visibleHabits.length === 0 && (
+            <div className="col-span-full py-20 text-center">
+              <EmptyState 
+                icon={showArchivedHabits ? "📂" : "🌱"} 
+                title={showArchivedHabits ? "Архив пуст" : "Здесь пока пусто"} 
+                text={showArchivedHabits ? "Ты пока ничего не сохраняла в архив" : "Добавь свою первую привычку, чтобы котик не скучал! Ритм — это жизнь ✨"} 
+              />
+              {!showArchivedHabits && (
+                <div className="flex justify-center mt-6">
+                  <button className="btn px-10" onClick={() => setIsHabitModalOpen(true)}>Создать привычку</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderTasks = () => {
     const filteredTasks = state.tasks.filter(t => {
@@ -2673,32 +3391,67 @@ export default function App() {
     const isToday = taskViewDate === todayISO();
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-10">
+        <div className="section-header flex justify-between items-end px-2">
+          <div className="space-y-2">
+            <h3 className="text-4xl lg:text-5xl font-black tracking-tighter font-display leading-none">Задачи 📝</h3>
+            <p className="text-xs text-muted font-black uppercase tracking-[0.2em] opacity-60">Маленькие шаги к большим целям</p>
+          </div>
+          <p className="text-[10px] text-muted font-bold opacity-40 uppercase tracking-widest">{taskViewDate}</p>
+        </div>
+
         {/* Date Selector Header */}
         <div className="flex items-center justify-between bg-surface p-2 rounded-2xl border border-line">
           <button 
-            onClick={() => setTaskViewDate(addDaysISO(taskViewDate, -1))}
-            className="p-2 hover:bg-surface-2 rounded-xl transition-colors"
+            onClick={() => {
+              setTaskViewDate(addDaysISO(taskViewDate, -1));
+              setTaskFilter(prev => ({ ...prev, showAllDates: false }));
+            }}
+            className="p-2 hover:bg-surface-2 rounded-xl transition-colors disabled:opacity-30"
+            disabled={taskFilter.showAllDates}
           >
             <ChevronLeft size={20} />
           </button>
+          
           <div className="flex flex-col items-center">
-            <span className="text-sm font-bold">
-              {isToday ? 'Сегодня' : taskViewDate}
-            </span>
+            {taskFilter.showAllDates ? (
+              <span className="text-sm font-bold">Все даты</span>
+            ) : (
+              <div className="relative flex items-center justify-center cursor-pointer group">
+                <span className="text-sm font-bold group-hover:text-primary transition-colors flex items-center gap-1.5">
+                  <CalendarIcon size={14} className="text-muted group-hover:text-primary transition-colors" />
+                  {isToday ? 'Сегодня' : taskViewDate}
+                </span>
+                <input 
+                  type="date"
+                  title="Выбрать дату"
+                  value={taskViewDate}
+                  onChange={(e) => {
+                    if(e.target.value) setTaskViewDate(e.target.value);
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+            )}
+            
             <button 
               onClick={() => setTaskFilter(prev => ({ ...prev, showAllDates: !prev.showAllDates }))}
               className={cn(
-                "text-[9px] font-bold uppercase tracking-widest mt-0.5",
-                taskFilter.showAllDates ? "text-primary" : "text-muted"
+                "text-[9px] font-bold uppercase tracking-widest mt-1",
+                taskFilter.showAllDates ? "text-primary" : "text-muted hover:text-text transition-colors"
               )}
             >
-              {taskFilter.showAllDates ? "Показать только на дату" : "Показать все даты"}
+              {taskFilter.showAllDates ? "Выбрать конкретную" : "Показать все даты"}
             </button>
           </div>
+
           <button 
-            onClick={() => setTaskViewDate(addDaysISO(taskViewDate, 1))}
-            className="p-2 hover:bg-surface-2 rounded-xl transition-colors"
+            onClick={() => {
+              setTaskViewDate(addDaysISO(taskViewDate, 1));
+              setTaskFilter(prev => ({ ...prev, showAllDates: false }));
+            }}
+            className="p-2 hover:bg-surface-2 rounded-xl transition-colors disabled:opacity-30"
+            disabled={taskFilter.showAllDates}
           >
             <ChevronRight size={20} />
           </button>
@@ -2714,11 +3467,11 @@ export default function App() {
                 placeholder="Что нужно сделать?"
                 value={newTaskText}
                 onChange={(e) => setNewTaskText(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (handleAddTask(newTaskText, newTaskPriority, newTaskDate, newTaskRecurring, undefined, newTaskIcon, newTaskTags.split(',')), setNewTaskText(''), setNewTaskTags(''))}
+                onKeyDown={(e) => e.key === 'Enter' && (handleAddTask(newTaskText, newTaskPriority, newTaskDate, newTaskRecurring, newTaskRecurringDays, newTaskIcon, newTaskTags.split(',')), setNewTaskText(''), setNewTaskTags(''), setNewTaskRecurringDays([]))}
               />
               <button 
                 className="btn py-2 px-8"
-                onClick={() => { handleAddTask(newTaskText, newTaskPriority, newTaskDate, newTaskRecurring, undefined, newTaskIcon, newTaskTags.split(',')); setNewTaskText(''); setNewTaskTags(''); }}
+                onClick={() => { handleAddTask(newTaskText, newTaskPriority, newTaskDate, newTaskRecurring, newTaskRecurringDays, newTaskIcon, newTaskTags.split(',')); setNewTaskText(''); setNewTaskTags(''); setNewTaskRecurringDays([]); }}
               >
                 <Plus size={18} className="mr-2" /> Добавить
               </button>
@@ -2792,13 +3545,44 @@ export default function App() {
                 </select>
               </div>
             </div>
+
+            {newTaskRecurring === 'weekly' && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="flex flex-col gap-2 pt-2 border-t border-line/30"
+              >
+                <label className="text-[10px] font-bold text-muted uppercase">Дни недели</label>
+                <div className="flex flex-wrap gap-2">
+                  {['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'].map((day, i) => (
+                    <button
+                      key={day}
+                      onClick={() => {
+                        setNewTaskRecurringDays(prev => 
+                          prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i]
+                        );
+                      }}
+                      className={cn(
+                        "w-9 h-9 rounded-xl text-[10px] font-black uppercase transition-all duration-200",
+                        newTaskRecurringDays.includes(i) 
+                          ? "bg-primary text-white shadow-lg shadow-primary/20 scale-110" 
+                          : "bg-surface-2 text-muted border border-line hover:border-primary/30"
+                      )}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[9px] text-muted italic">Выберите дни, в которые задача должна повторяться автоматически.</p>
+              </motion.div>
+            )}
           </div>
         </div>
 
         <div className="card">
           <div className="flex flex-col gap-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <h3 className="text-lg font-bold">Список задач ({filteredTasks.length}) 📋</h3>
+              <h3 className="text-lg font-bold">Управление задачами ({filteredTasks.length}) 📋</h3>
               <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
                 <div className="relative w-full sm:w-48">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -2916,7 +3700,12 @@ export default function App() {
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: 10 }}
-                    className="task-row flex items-center gap-3 p-4 rounded-2xl bg-surface-2 border border-line group hover:border-primary/30 transition-all shadow-sm hover:shadow-md"
+                    className={cn(
+                      "task-row flex items-center gap-3 p-4 rounded-2xl border transition-all shadow-sm hover:shadow-md group",
+                      task.priority === 'urgent' ? "bg-bad/5 border-bad/20" : 
+                      task.priority === 'important' ? "bg-warn/5 border-warn/20" : 
+                      "bg-surface-2 border-line"
+                    )}
                   >
                     <button 
                       onClick={() => handleTaskToggle(task.id)}
@@ -2970,8 +3759,17 @@ export default function App() {
                           </span>
                         )}
 
-                        <span className="text-[9px] text-muted font-medium ml-auto">
-                          {task.date} {task.recurring !== 'none' && `· ${task.recurring}`}
+                        <span className="text-[9px] text-muted font-medium ml-auto flex items-center gap-1">
+                          <CalendarIcon size={10} />
+                          {task.date} 
+                          {task.recurring !== 'none' && (
+                            <span className="ml-1 text-primary-2 font-bold px-1.5 py-0.5 bg-primary/5 rounded-md flex items-center gap-1">
+                              <RefreshCw size={8} />
+                              {task.recurring === 'daily' ? 'Ежедневно' : 
+                               task.recurring === 'weekdays' ? 'Будни' : 
+                               `Еженедельно (${task.recurringDays?.map(d => ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][d]).join(', ')})`}
+                            </span>
+                          )}
                         </span>
                       </div>
                     </div>
@@ -2984,10 +3782,11 @@ export default function App() {
                   </motion.div>
                 ))
               ) : (
-                <div className="py-12 text-center text-muted">
-                  <div className="text-4xl mb-3">🔍</div>
-                  <p>Задачи не найдены</p>
-                </div>
+                <EmptyState 
+                  icon="🔍" 
+                  title="Задачи не найдены" 
+                  text="Попробуй изменить фильтры или добавь новую задачу на эту дату ✨" 
+                />
               )}
             </AnimatePresence>
           </div>
@@ -3002,11 +3801,11 @@ export default function App() {
     return (
       <div className="space-y-10">
         <div className="section-header px-2">
-          <h3 className="text-3xl font-black tracking-tight font-display text-text">Мой дневник 📖</h3>
-          <p className="text-[10px] text-muted font-black uppercase tracking-[0.2em] mt-1 opacity-60">Твое безопасное пространство для мыслей</p>
+          <h3 className="text-4xl lg:text-5xl font-black tracking-tighter font-display text-text leading-none">Мой дневник 📖</h3>
+          <p className="text-xs text-muted font-black uppercase tracking-[0.2em] mt-2 opacity-60">Твое безопасное пространство для мыслей</p>
         </div>
 
-        <div className="card border-primary/20 shadow-lg shadow-primary/5">
+        <div className="card glass border-primary/20 shadow-xl shadow-primary/5 rounded-[40px] p-8 lg:p-10">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-sm font-black uppercase tracking-widest text-primary">Как ты сегодня?</h3>
             <button 
@@ -3091,12 +3890,20 @@ export default function App() {
               {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
               {isRecording ? 'Слушаю...' : 'Голосовая заметка'}
             </button>
-            <button 
-              className={cn("btn", isAIThinking && "opacity-50 pointer-events-none")}
-              onClick={() => askGemini(`Проанализируй мой день: ${JSON.stringify(state.journalEntries[todayISO()])}. Дай короткий совет.`)}
-            >
-              {isAIThinking ? <RefreshCw size={18} className="animate-spin" /> : '✨ Диско-ИИ'}
-            </button>
+            <div className="flex gap-2">
+              <button 
+                className={cn("chip-btn flex items-center gap-2", isAIThinking && "opacity-50 pointer-events-none")}
+                onClick={extractTasksFromJournal}
+              >
+                <ListTodo size={14} className="text-primary" /> Задачи
+              </button>
+              <button 
+                className={cn("btn", isAIThinking && "opacity-50 pointer-events-none")}
+                onClick={() => askGemini(`Проанализируй мой день: ${JSON.stringify(state.journalEntries[todayISO()])}. Дай короткий совет.`)}
+              >
+                {isAIThinking ? <RefreshCw size={18} className="animate-spin" /> : '✨ Диско-ИИ'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -3109,15 +3916,18 @@ export default function App() {
               .map(([date, e]) => {
                 const entry = e as JournalEntry;
                 return (
-                  <div key={date} className="card space-y-3 flex flex-col">
+                  <div key={date} className="card space-y-3 flex flex-col hover:border-primary/20 transition-all cursor-pointer" onClick={() => { setSelectedDate(date); setIsDayModalOpen(true); }}>
                     <div className="flex justify-between items-center">
                       <div className="font-bold text-sm">{date}</div>
                       {entry.mood && <div className="text-xl">{MOOD_SCALE.find(m => m.v === entry.mood)?.e}</div>}
                     </div>
-                    {entry.note && <div className="text-sm text-muted whitespace-pre-wrap line-clamp-4 flex-1">{entry.note}</div>}
+                    {entry.note ? (
+                      <div className="text-sm text-muted whitespace-pre-wrap line-clamp-4 flex-1">«{entry.note}»</div>
+                    ) : (
+                      <div className="text-xs text-muted/40 italic flex-1">Только настроение...</div>
+                    )}
                     <button 
-                      className="text-[10px] font-bold text-primary hover:underline mt-2 text-left"
-                      onClick={() => { setSelectedDate(date); setIsDayModalOpen(true); }}
+                      className="text-[10px] font-black uppercase tracking-widest text-primary hover:underline mt-2 text-left"
                     >
                       Читать полностью →
                     </button>
@@ -3126,9 +3936,11 @@ export default function App() {
               })}
           </div>
           {Object.entries(state.journalEntries).filter(([date, e]) => date !== todayISO() && ((e as JournalEntry).note || (e as JournalEntry).mood)).length === 0 && (
-            <div className="text-center py-12 text-muted italic">
-              История пока пуста. Заполни первую страницу! 📖
-            </div>
+            <EmptyState 
+              icon="📖" 
+              title="Архив пуст" 
+              text="Твоя история только начинается. Сделай первую запись сегодня!" 
+            />
           )}
         </div>
       </div>
@@ -3136,13 +3948,14 @@ export default function App() {
   };
 
   const heatmapData = useMemo(() => {
-    const data: Record<string, { val: number, habitsCount: number, entry: JournalEntry | null }> = {};
+    const data: Record<string, { val: number, habitsCount: number, entry: JournalEntry | null, completedHabitNames: string[] }> = {};
     const year = heatmapYear;
     for (let i = 0; i < 366; i++) {
       const d = new Date(year, 0, 1 + i);
       if (d.getFullYear() !== year) continue;
       const iso = isoDate(d);
-      const habitsCount = state.habits.filter(h => h.dates.includes(iso)).length;
+      const dayHabits = state.habits.filter(h => h.dates.includes(iso));
+      const habitsCount = dayHabits.length;
       const entry = state.journalEntries[iso] as JournalEntry;
       let score = 0;
       if (habitsCount > 0) score += 1;
@@ -3152,7 +3965,7 @@ export default function App() {
       if (habitsCount === state.habits.length && state.habits.length > 0) score += 1;
       if (entry?.mood) score += 1;
       if (entry?.note && entry.note.length > 5) score += 1;
-      data[iso] = { val: Math.min(4, score), habitsCount, entry };
+      data[iso] = { val: Math.min(4, score), habitsCount, entry, completedHabitNames: dayHabits.map(h => h.name) };
     }
     return data;
   }, [state.habits, state.journalEntries, heatmapYear]);
@@ -3170,6 +3983,20 @@ export default function App() {
 
     const monthLabels: { label: string; col: number }[] = [];
     let currentMonth = -1;
+
+    // Stats Calculation
+    const activeDaysCount = Object.values(heatmapData).filter(d => d.val > 0).length;
+    const totalDays = days.length;
+    const activePercent = ((activeDaysCount / totalDays) * 100).toFixed(1);
+
+    const habitsByMonth = new Array(12).fill(0);
+    Object.entries(heatmapData).forEach(([date, info]) => {
+      const month = getDayFromISO(date).getMonth();
+      habitsByMonth[month] += info.habitsCount;
+    });
+    const maxHabitsMonthIdx = habitsByMonth.indexOf(Math.max(...habitsByMonth));
+    const productiveMonth = new Date(year, maxHabitsMonthIdx).toLocaleString('ru-RU', { month: 'long' });
+    const totalHabits = habitsByMonth.reduce((a, b) => a + b, 0);
 
     // Fixed width calculations: cell (14px) + horizontal gap (2px) = 16px
     const CELL_SIZE = 14;
@@ -3290,12 +4117,13 @@ export default function App() {
                     {column.map((date, dayIdx) => {
                       if (!date) return <div key={dayIdx} className="w-[14px] h-[14px] rounded-[3px] bg-transparent" />;
                       
-                      const val = heatmapData[date]?.val || 0;
-                      const isToday = date === todayISO();
                       const dayInfo = heatmapData[date];
+                      const val = dayInfo?.val || 0;
+                      const isToday = date === todayISO();
                       const habitsCount = dayInfo?.habitsCount || 0;
-                      const hasMood = !!dayInfo?.entry?.mood;
-                      const hasNote = !!dayInfo?.entry?.note;
+                      const moodEmoji = dayInfo?.entry?.mood ? MOOD_SCALE.find(m => m.v === dayInfo.entry!.mood)?.e : '';
+                      const habitNames = dayInfo?.completedHabitNames?.join(', ') || '';
+                      const tooltipText = `${date}\n${habitsCount} привычек: ${habitNames}\nНастроение: ${moodEmoji || '—'}\n${dayInfo?.entry?.note ? `Заметка: ${dayInfo.entry.note.slice(0, 40)}...` : ''}`;
 
                       return (
                         <motion.div 
@@ -3311,7 +4139,7 @@ export default function App() {
                             isToday && "ring-2 ring-primary ring-offset-1 ring-offset-surface"
                           )}
                           onClick={() => { setSelectedDate(date); setIsDayModalOpen(true); }}
-                          title={`${date}: ${habitsCount} привычек, ${hasMood ? 'настроение есть' : 'нет настроения'}, ${hasNote ? 'заметка есть' : 'нет заметки'}`}
+                          title={tooltipText}
                         />
                       );
                     })}
@@ -3319,24 +4147,12 @@ export default function App() {
                 ))}
               </div>
             </div>
-            
-            {/* Heatmap Legend */}
-            <div className="mt-8 flex items-center justify-end gap-2 text-[10px] font-bold text-muted uppercase tracking-widest px-2">
-               <span>Меньше</span>
-               <div className="flex gap-1.5">
-                  <div className="w-3.5 h-3.5 rounded-[2px] bg-surface-2 border border-line/10" title="Нет активности" />
-                  <div className="w-3.5 h-3.5 rounded-[2px] lv1" title="Минимум активности (1+ действие)" />
-                  <div className="w-3.5 h-3.5 rounded-[2px] lv2" title="Хороший темп (50% целей)" />
-                  <div className="w-3.5 h-3.5 rounded-[2px] lv3" title="Продуктивно (Все цели или цели+настроение)" />
-                  <div className="w-3.5 h-3.5 rounded-[2px] lv4" title="Идеально (Все цели + дневник)" />
-               </div>
-               <span>Больше</span>
-            </div>
           </div>
         ) : (
           <RadialHeatmap 
             year={year} 
             data={heatmapData} 
+            theme={state.settings.theme}
             onDateClick={(date) => {
               setSelectedDate(date);
               setIsDayModalOpen(true);
@@ -3344,36 +4160,37 @@ export default function App() {
           />
         )}
         
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="card p-4 flex flex-col items-center justify-center text-center">
-            <div className="text-2xl font-bold text-primary">{Object.values(heatmapData).filter(d => d.val > 0).length}</div>
-            <div className="text-[10px] text-muted font-bold uppercase">Активных дней</div>
-          </div>
-          <div className="card p-4 flex flex-col items-center justify-center text-center">
-            <div className="text-2xl font-bold text-primary-2">{overallStreak}</div>
-            <div className="text-[10px] text-muted font-bold uppercase">Текущая серия</div>
-          </div>
-          <div className="card p-4 flex flex-col items-center justify-center text-center">
-            <div className="text-2xl font-bold text-accent">
-              {Math.round((Object.values(heatmapData).filter(d => d.val > 0).length / days.length) * 100)}%
+        {/* Common Legend and Stats Footer */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-8 border-t border-line/10 pt-8 mt-6">
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-[10px] font-black uppercase tracking-widest text-muted whitespace-nowrap">Меньше</span>
+            <div className="flex gap-1.5 sm:gap-2">
+              <div className="heatcell w-4 h-4 rounded-[3px] bg-surface-2 border border-line/10" title="Нет активности" />
+              <div className="heatcell w-4 h-4 rounded-[3px] lv1" title="1 балл (Напр. 1 привычка)" />
+              <div className="heatcell w-4 h-4 rounded-[3px] lv2" title="2 балла (Привычки + Цели)" />
+              <div className="heatcell w-4 h-4 rounded-[3px] lv3" title="3 балла (Высокая активность)" />
+              <div className="heatcell w-4 h-4 rounded-[3px] lv4" title="4 балла (Идеальный день)" />
             </div>
-            <div className="text-[10px] text-muted font-bold uppercase">Процент года</div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-muted whitespace-nowrap">Больше</span>
+          </div>
+
+          <div className="flex flex-wrap gap-8 lg:gap-12 w-full lg:w-auto overflow-x-auto no-scrollbar">
+            <div className="stats-item flex flex-col min-w-[120px]">
+              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted mb-1 opacity-60">Продуктивный месяц</span>
+              <span className="text-sm font-black text-primary uppercase font-display leading-tight">{productiveMonth}</span>
+            </div>
+            <div className="stats-item flex flex-col min-w-[100px]">
+              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted mb-1 opacity-60">Всего привычек</span>
+              <span className="text-sm font-black text-primary-2 font-display leading-tight">{totalHabits}</span>
+            </div>
+            <div className="stats-item flex flex-col min-w-[100px]">
+              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-muted mb-1 opacity-60">Активных дней</span>
+              <span className="text-sm font-black text-accent font-display leading-tight">{activePercent}%</span>
+            </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-line">
-          <div className="flex items-center gap-2 text-[10px] text-muted font-bold uppercase">
-            <span>Меньше</span>
-            <div className="flex gap-1">
-              <div className="w-3 h-3 rounded-[2px] bg-surface-2" title="Нет активности" />
-              <div className="w-3 h-3 rounded-[2px] lv1" title="Минимум" />
-              <div className="w-3 h-3 rounded-[2px] lv2" title="50% целей" />
-              <div className="w-3 h-3 rounded-[2px] lv3" title="Все цели" />
-              <div className="w-3 h-3 rounded-[2px] lv4" title="Идеал" />
-            </div>
-            <span>Больше</span>
-          </div>
-          
+        <div className="flex justify-end pt-4 border-t border-line">
           <div className="group relative">
             <div className="flex items-center gap-1 text-[10px] font-bold text-primary cursor-help uppercase tracking-wider">
               <Info size={12} /> Как считаются баллы?
@@ -3396,16 +4213,22 @@ export default function App() {
 
   const renderSettings = () => (
     <div className="space-y-10">
-      <div className="section-header px-2">
-        <h3 className="text-3xl font-black tracking-tight font-display text-text">Настройки ⚙️</h3>
-        <p className="text-[10px] text-muted font-black uppercase tracking-[0.2em] mt-1 opacity-60">Твой ритм — твои правила</p>
+      <div className="section-header flex items-end justify-between px-2">
+        <div className="space-y-2">
+          <h3 className="text-4xl lg:text-5xl font-black tracking-tighter font-display leading-none">Настройки ⚙️</h3>
+          <p className="text-xs text-muted font-black uppercase tracking-[0.2em] opacity-60">Твой ритм — твои правила</p>
+        </div>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-2 h-2 rounded-full bg-good animate-pulse" />
+          <span className="text-[10px] uppercase font-black tracking-widest opacity-40">Система стабильна</span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="card h-full space-y-8">
+        <div className="card h-full space-y-8 glass shadow-xl shadow-primary/5">
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-primary mb-6 flex items-center gap-2">
-              <UserIcon size={18} /> Профиль
+            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-primary mb-8 flex items-center gap-3 font-display">
+              <UserIcon size={20} /> Профиль
             </h3>
             <div className="space-y-6">
               <div className="field space-y-2">
@@ -3472,10 +4295,10 @@ export default function App() {
         </div>
       </div>
 
-      <div className="card h-full space-y-8">
+      <div className="card h-full space-y-8 glass shadow-xl shadow-primary-2/5">
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-primary mb-6 flex items-center gap-2">
-              <Palette size={18} /> Интерфейс
+            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-primary mb-8 flex items-center gap-3 font-display">
+              <Palette size={20} /> Интерфейс
             </h3>
             <div className="grid grid-cols-2 gap-3">
               {(['light', 'dark', 'pink', 'cyberpunk'] as const).map(t => (
@@ -3528,6 +4351,101 @@ export default function App() {
                   />
                 </button>
               </div>
+
+              <div className="flex items-center justify-between p-4 rounded-3xl bg-bg-soft border border-line/50">
+                <div className="space-y-0.5">
+                  <div className="font-black text-xs">Экономный режим</div>
+                  <div className="text-[10px] text-muted font-bold opacity-60">Отключает размытие и тени</div>
+                </div>
+                <button 
+                  onClick={() => handleStateChange(prev => ({
+                    ...prev,
+                    settings: { ...prev.settings, ecoMode: !prev.settings.ecoMode }
+                  }))}
+                  className={cn(
+                    "w-12 h-6 rounded-full p-1 transition-colors relative",
+                    state.settings.ecoMode ? "bg-good" : "bg-line"
+                  )}
+                >
+                  <motion.div 
+                    animate={{ x: state.settings.ecoMode ? 24 : 0 }}
+                    className="w-4 h-4 bg-white rounded-full shadow-sm"
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-4 rounded-3xl bg-bg-soft border border-line/50">
+                <div className="space-y-0.5">
+                  <div className="font-black text-xs">Освещение</div>
+                  <div className="text-[10px] text-muted font-bold opacity-60">Динамическое пятно света</div>
+                </div>
+                <button 
+                  onClick={() => handleStateChange(prev => ({
+                    ...prev,
+                    settings: { ...prev.settings, dynamicLighting: !prev.settings.dynamicLighting }
+                  }))}
+                  className={cn(
+                    "w-12 h-6 rounded-full p-1 transition-colors relative",
+                    state.settings.dynamicLighting ? "bg-primary" : "bg-line"
+                  )}
+                >
+                  <motion.div 
+                    animate={{ x: state.settings.dynamicLighting ? 24 : 0 }}
+                    className="w-4 h-4 bg-white rounded-full shadow-sm"
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-4 rounded-3xl bg-bg-soft border border-line/50">
+                <div className="space-y-0.5">
+                  <div className="font-black text-xs">Уведомления</div>
+                  <div className="text-[10px] text-muted font-bold opacity-60">Пуши о завершении фокуса</div>
+                </div>
+                <button 
+                  onClick={async () => {
+                    const status = state.settings.notifEnabled;
+                    if (!status && "Notification" in window) {
+                      const res = await Notification.requestPermission();
+                      if (res !== 'granted') return;
+                    }
+                    handleStateChange(prev => ({
+                      ...prev,
+                      settings: { ...prev.settings, notifEnabled: !status }
+                    }));
+                  }}
+                  className={cn(
+                    "w-12 h-6 rounded-full p-1 transition-colors relative",
+                    state.settings.notifEnabled ? "bg-primary" : "bg-line"
+                  )}
+                >
+                  <motion.div 
+                    animate={{ x: state.settings.notifEnabled ? 24 : 0 }}
+                    className="w-4 h-4 bg-white rounded-full shadow-sm"
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-4 rounded-3xl bg-bg-soft border border-line/50">
+                <div className="space-y-0.5">
+                  <div className="font-black text-xs">Звуки</div>
+                  <div className="text-[10px] text-muted font-bold opacity-60">Сигнал завершения и клики</div>
+                </div>
+                <button 
+                  onClick={() => handleStateChange(prev => ({
+                    ...prev,
+                    settings: { ...prev.settings, soundEffects: !prev.settings.soundEffects }
+                  }))}
+                  className={cn(
+                    "w-12 h-6 rounded-full p-1 transition-colors relative",
+                    state.settings.soundEffects ? "bg-primary" : "bg-line"
+                  )}
+                >
+                  <motion.div 
+                    animate={{ x: state.settings.soundEffects ? 24 : 0 }}
+                    className="w-4 h-4 bg-white rounded-full shadow-sm"
+                  />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -3536,7 +4454,8 @@ export default function App() {
   );
   return (
     <ErrorBoundary>
-      <div className={cn("min-h-screen app lg:flex", isPartyMode && "party-active")} data-theme={state.settings.theme}>
+      <DynamicLighting enabled={state.settings.dynamicLighting && !state.settings.ecoMode} />
+      <div className={cn("min-h-screen app lg:flex", isPartyMode && "party-active", state.settings.ecoMode && "eco-mode")} data-theme={state.settings.theme}>
       {/* Onboarding */}
       {showOnboarding && (
         <OnboardingModal 
@@ -3565,8 +4484,8 @@ export default function App() {
       {/* Dynamic Background */}
       <audio ref={audioRef} loop src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" />
 
-      <aside className="sidebar hidden lg:flex flex-col">
-        <div className="brand brand-wrap cursor-pointer group" onClick={handleLogoClick}>
+      <aside className="sidebar hidden lg:flex flex-col glass backdrop-blur-xl border-r border-line/10">
+        <div className="brand brand-wrap cursor-pointer group mb-12" onClick={handleLogoClick}>
           <div className="sparkle sparkle-1"></div>
           <div className="sparkle sparkle-2"></div>
           <div className="sparkle sparkle-3"></div>
@@ -3675,9 +4594,9 @@ export default function App() {
 
       {/* Main Content */}
       <main className="main flex-1 pb-12 lg:pb-8 px-4 lg:px-8 max-w-7xl mx-auto w-full relative">
-        <header className="topbar flex justify-between items-center mb-8 py-4 sticky top-0 bg-bg/80 backdrop-blur-md z-40 -mx-4 px-4 border-b border-line/10 lg:static lg:bg-transparent lg:border-none lg:mx-0 lg:px-0">
+        <header className="topbar flex justify-between items-center mb-10 py-6 sticky top-0 glass backdrop-blur-md z-40 -mx-4 px-6 border-b border-line/10 lg:static lg:bg-transparent lg:border-none lg:mx-0 lg:px-0">
           <div className="greet">
-            <h2 className="font-display text-3xl lg:text-4xl font-bold flex items-center gap-3">
+            <h2 className="font-display text-4xl lg:text-5xl font-black flex items-center gap-4">
             <motion.span 
               animate={isPartyMode ? { rotate: 360 } : { rotate: 0 }}
               transition={isPartyMode ? { duration: 4, repeat: Infinity, ease: "linear" } : { duration: 0.5 }}
@@ -3755,6 +4674,10 @@ export default function App() {
         data={catPopup} 
         onClose={() => setCatPopup(null)} 
         onSave={saveCatToGallery} 
+        onRefresh={() => {
+          setCatPopup(prev => prev ? { ...prev, img: '', breed: undefined } : null);
+          fetchNextCat();
+        }}
         catLevel={state.cat.level}
         catExp={state.cat.exp}
       />
@@ -3767,6 +4690,263 @@ export default function App() {
         onConfirm={confirmModal?.onConfirm || (() => {})}
         onCancel={() => setConfirmModal(null)}
       />
+
+      {/* Goal Constructor Modal */}
+      <AnimatePresence>
+        {isGoalModalOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[6000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="w-full max-w-lg bg-surface rounded-[48px] border border-white/10 shadow-2xl overflow-hidden glass relative"
+            >
+              <div className="p-8 space-y-8">
+                <div className="flex justify-between items-center">
+                  <div className="space-y-1">
+                    <h3 className="text-3xl font-black font-display tracking-tight leading-none">
+                      {editingGoalId ? 'Правка цели' : 'Новое видение'}
+                    </h3>
+                    <div className="flex items-center gap-2">
+                       <span className="text-[10px] text-muted font-bold uppercase tracking-widest opacity-60">Шаг {goalModalStep} из 3</span>
+                       <div className="flex gap-1">
+                          {[1,2,3].map(s => (
+                            <div key={s} className={cn("h-1 rounded-full transition-all", s <= goalModalStep ? "w-4 bg-primary" : "w-1 bg-surface-2")} />
+                          ))}
+                       </div>
+                    </div>
+                  </div>
+                  <button onClick={() => setIsGoalModalOpen(false)} className="p-3 hover:bg-bg-soft rounded-2xl transition-colors">
+                    <X size={24} />
+                  </button>
+                </div>
+
+                <div className="min-h-[300px]">
+                  <AnimatePresence mode="wait">
+                    {goalModalStep === 1 && (
+                      <motion.div 
+                        key="step1"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="space-y-6"
+                      >
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted ml-1">Как назовем проект?</label>
+                          <input 
+                            autoFocus
+                            type="text"
+                            value={goalName}
+                            onChange={(e) => setGoalName(e.target.value)}
+                            className="w-full bg-surface-2 border border-line/50 p-6 rounded-[32px] text-2xl font-black outline-none focus:border-primary transition-all shadow-inner"
+                            placeholder="Название цели..."
+                          />
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-6">
+                           <div className="space-y-2">
+                              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted ml-1">Символ удачи</label>
+                              <div className="flex flex-wrap gap-2 bg-surface-2 p-3 rounded-[32px] border border-line/50">
+                                {['🎯', '🔥', '📚', '💰', '🏃', '🌿', '💻', '🎨', '🚀', '✨'].map(i => (
+                                  <button 
+                                    key={i}
+                                    onClick={() => setGoalIcon(i)}
+                                    className={cn(
+                                      "w-10 h-10 flex items-center justify-center text-xl rounded-xl transition-all",
+                                      goalIcon === i ? "bg-primary text-white shadow-glow" : "hover:bg-bg-soft"
+                                    )}
+                                  >
+                                    {i}
+                                  </button>
+                                ))}
+                              </div>
+                           </div>
+                           <div className="space-y-2">
+                              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted ml-1">Цвет настроения</label>
+                              <div className="flex flex-wrap gap-2 bg-surface-2 p-3 rounded-[32px] border border-line/50">
+                                {['#ff5dac', '#ec4899', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#6366f1'].map(c => (
+                                  <button 
+                                    key={c}
+                                    onClick={() => setGoalColor(c)}
+                                    className={cn(
+                                      "w-10 h-10 rounded-xl transition-all border-2",
+                                      goalColor === c ? "border-white shadow-lg scale-110" : "border-transparent opacity-60 hover:opacity-100"
+                                    )}
+                                    style={{ backgroundColor: c }}
+                                  />
+                                ))}
+                              </div>
+                           </div>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {goalModalStep === 2 && (
+                      <motion.div 
+                        key="step2"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="space-y-8"
+                      >
+                         <div className="grid grid-cols-2 gap-6">
+                            <div className="space-y-2">
+                               <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted ml-1">Целевой масштаб</label>
+                               <div className="relative">
+                                  <input 
+                                    type="number"
+                                    value={goalTarget}
+                                    onChange={(e) => setGoalTarget(parseInt(e.target.value) || 0)}
+                                    className="w-full bg-surface-2 border border-line/50 p-6 rounded-[32px] text-3xl font-black outline-none focus:border-primary transition-all"
+                                  />
+                                  <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-1 text-muted opacity-50">
+                                    <Target size={24} />
+                                  </div>
+                               </div>
+                            </div>
+                            <div className="space-y-2">
+                               <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted ml-1">Единица измерения</label>
+                               <div className="grid grid-cols-2 gap-2">
+                                  {['%', 'ед.', 'стр.', 'час', 'мин.', 'руб.', 'занятий', 'раз'].map(u => (
+                                    <button 
+                                      key={u}
+                                      onClick={() => setGoalUnit(u)}
+                                      className={cn(
+                                        "py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border border-line/30",
+                                        goalUnit === u ? "bg-primary text-white border-primary shadow-sm" : "bg-bg-soft hover:bg-line/20"
+                                      )}
+                                    >
+                                      {u}
+                                    </button>
+                                  ))}
+                                  <input 
+                                    type="text"
+                                    placeholder="Своё..."
+                                    className="col-span-2 bg-surface-2 border border-line/50 p-2 rounded-xl text-center text-xs outline-none focus:border-primary"
+                                    onChange={(e) => setGoalUnit(e.target.value)}
+                                  />
+                               </div>
+                            </div>
+                         </div>
+
+                         <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted ml-1">Шаг прогресса (+ / -)</label>
+                            <div className="flex items-center gap-6 bg-surface-2 p-4 rounded-[32px] border border-line/50">
+                               <div className="flex-1 space-y-1">
+                                  <div className="text-xs font-black">Удобный интервал</div>
+                                  <p className="text-[9px] text-muted leading-tight">На сколько будет меняться прогресс при нажатии кнопок на главной</p>
+                               </div>
+                               <input 
+                                 type="number"
+                                 value={goalStepValue}
+                                 onChange={(e) => setGoalStepValue(parseInt(e.target.value) || 1)}
+                                 className="w-24 bg-surface p-4 rounded-2xl text-center font-black text-xl outline-none border border-line"
+                               />
+                            </div>
+                         </div>
+                      </motion.div>
+                    )}
+
+                    {goalModalStep === 3 && (
+                      <motion.div 
+                        key="step3"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="space-y-8"
+                      >
+                         <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted ml-1">Дата финиша</label>
+                            <div className="relative">
+                               <input 
+                                 type="date"
+                                 value={goalDeadline}
+                                 onChange={(e) => setGoalDeadline(e.target.value)}
+                                 className="w-full bg-surface-2 border border-line/50 p-6 rounded-[32px] text-2xl font-black outline-none focus:border-primary transition-all cursor-pointer"
+                               />
+                               <div className="absolute right-6 top-1/2 -translate-y-1/2 text-muted opacity-50">
+                                  <CalendarIcon size={24} />
+                               </div>
+                            </div>
+                         </div>
+
+                         {goalDeadline && (
+                           <div className="p-6 rounded-[32px] bg-primary-soft/10 border border-primary/20 space-y-3">
+                              <h4 className="text-xs font-black uppercase tracking-widest text-primary flex items-center gap-2">
+                                <Sparkles size={14} /> Умный расчет
+                              </h4>
+                              {(() => {
+                                 const days = Math.ceil((new Date(goalDeadline).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+                                 if (days <= 0) return <p className="text-sm font-medium opacity-80">Дедлайн сегодня или уже прошел! Пора завершать! 🚀</p>;
+                                 const perDay = (goalTarget / days).toFixed(1);
+                                 const perWeek = ((goalTarget / days) * 7).toFixed(1);
+                                 return (
+                                   <div className="space-y-4">
+                                      <p className="text-sm font-medium opacity-80 leading-relaxed">
+                                        До дедлайна <span className="font-black text-primary">{days} дн.</span> Чтобы успеть вовремя, нужно выполнять в среднем:
+                                      </p>
+                                      <div className="grid grid-cols-2 gap-3">
+                                         <div className="bg-surface p-4 rounded-2xl border border-line/50">
+                                            <div className="text-[10px] text-muted font-bold uppercase">В день</div>
+                                            <div className="text-xl font-black text-primary">{perDay} <span className="text-[10px] opacity-60 ml-1">{goalUnit}</span></div>
+                                         </div>
+                                         <div className="bg-surface p-4 rounded-2xl border border-line/50">
+                                            <div className="text-[10px] text-muted font-bold uppercase">В неделю</div>
+                                            <div className="text-xl font-black text-primary">{perWeek} <span className="text-[10px] opacity-60 ml-1">{goalUnit}</span></div>
+                                         </div>
+                                      </div>
+                                   </div>
+                                 );
+                              })()}
+                           </div>
+                         )}
+
+                         {!goalDeadline && (
+                           <div className="p-10 text-center space-y-2 opacity-40">
+                              <Clock size={40} className="mx-auto" />
+                              <p className="text-xs font-bold uppercase tracking-widest">Бессрочная цель</p>
+                           </div>
+                         )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                <div className="flex gap-4 pt-4">
+                  {goalModalStep > 1 && (
+                    <button 
+                      onClick={() => setGoalModalStep(prev => prev - 1)}
+                      className="px-8 py-5 rounded-[24px] font-black uppercase text-xs tracking-widest bg-bg-soft hover:bg-line/20 transition-all"
+                    >
+                      Назад
+                    </button>
+                  )}
+                  {goalModalStep < 3 ? (
+                    <button 
+                      onClick={() => setGoalModalStep(prev => prev + 1)}
+                      className="flex-1 py-5 rounded-[24px] font-black uppercase text-xs tracking-widest bg-primary text-white shadow-glow hover:scale-[1.02] active:scale-95 transition-all"
+                    >
+                      Продолжить
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={handleSaveGoal}
+                      className="flex-1 py-5 rounded-[24px] font-black uppercase text-xs tracking-widest bg-good text-white shadow-md hover:scale-[1.02] active:scale-95 transition-all"
+                    >
+                      {editingGoalId ? 'Сохранить изменения' : 'Запустить цель 🚀'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Day Modal */}
       <AnimatePresence>
@@ -3838,48 +5018,68 @@ export default function App() {
               <div className="space-y-4">
                 <label className="text-sm font-bold text-muted block">Привычки</label>
                 <div className="space-y-2">
-                  {state.habits.map(h => (
-                    <div key={h.id} className="flex items-center justify-between p-3 rounded-xl bg-surface-2 border border-line">
-                      <div className="flex items-center gap-2">
-                        <span>{h.icon}</span>
-                        <span className="text-sm font-bold">{h.name}</span>
+                  {state.habits
+                    .filter(h => !h.archived || h.dates.includes(selectedDate))
+                    .map(h => (
+                      <div key={h.id} className={cn("flex items-center justify-between p-3 rounded-xl border border-line", h.archived ? "bg-bg-soft opacity-70" : "bg-surface-2")}>
+                        <div className="flex items-center gap-2">
+                          <span>{h.icon}</span>
+                          <span className="text-sm font-bold">
+                            {h.name} {h.archived && <span className="text-[9px] opacity-50 uppercase ml-1">(Архив)</span>}
+                          </span>
+                        </div>
+                        <button 
+                          className={cn(
+                            "chip-btn text-xs px-3 py-1 min-h-0 transition-all",
+                            h.dates.includes(selectedDate) && "bg-primary text-white border-transparent shadow-sm"
+                          )}
+                          onClick={() => handleStateChange(prev => ({
+                            ...prev,
+                            habits: prev.habits.map(x => x.id === h.id ? {
+                              ...x,
+                              dates: x.dates.includes(selectedDate)
+                                ? x.dates.filter(d => d !== selectedDate)
+                                : [...x.dates, selectedDate]
+                            } : x)
+                          }))}
+                        >
+                          {h.dates.includes(selectedDate) ? 'Готово' : 'Отметить'}
+                        </button>
                       </div>
-                      <button 
-                        className={cn(
-                          "chip-btn text-xs px-3 py-1 min-h-0",
-                          h.dates.includes(selectedDate) && "bg-primary text-white border-transparent"
-                        )}
-                        onClick={() => handleStateChange(prev => {
-                          const next = { ...prev };
-                          const habit = next.habits.find(x => x.id === h.id)!;
-                          if (habit.dates.includes(selectedDate)) {
-                            habit.dates = habit.dates.filter(d => d !== selectedDate);
-                          } else {
-                            habit.dates = [...habit.dates, selectedDate];
-                          }
-                          return next;
-                        })}
-                      >
-                        {h.dates.includes(selectedDate) ? 'Готово' : 'Отметить'}
-                      </button>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </div>
 
               <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <label className="text-sm font-bold text-muted block">Задачи на этот день</label>
+                <label className="text-sm font-bold text-muted block">Задачи на этот день</label>
+                
+                <div className="flex gap-2">
+                  <input 
+                    type="text"
+                    placeholder="Добавить новую задачу..."
+                    value={dayModalTaskText}
+                    onChange={(e) => setDayModalTaskText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && dayModalTaskText.trim()) {
+                        handleAddTask(dayModalTaskText, 'important', selectedDate);
+                        setDayModalTaskText('');
+                      }
+                    }}
+                    className="flex-1 bg-surface-2 border border-line p-3 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                  />
                   <button 
                     onClick={() => {
-                      const text = prompt('Введите задачу:');
-                      if (text) handleAddTask(text, 'important', selectedDate);
+                      if (dayModalTaskText.trim()) {
+                        handleAddTask(dayModalTaskText, 'important', selectedDate);
+                        setDayModalTaskText('');
+                      }
                     }}
-                    className="text-[10px] font-bold text-primary hover:underline uppercase"
+                    className="chip-btn p-3 aspect-square flex items-center justify-center text-primary border-primary/20"
                   >
-                    + Добавить
+                    <Plus size={20} />
                   </button>
                 </div>
+
                 <div className="space-y-2">
                   {state.tasks.filter(t => t.date === selectedDate).length > 0 ? (
                     state.tasks.filter(t => t.date === selectedDate).map(t => (
@@ -3946,7 +5146,7 @@ export default function App() {
                 />
                 {searchQuery && (
                   <button onClick={() => setSearchQuery('')} className="p-1 text-muted hover:text-primary">
-                    <RefreshCw size={14} />
+                    <X size={14} />
                   </button>
                 )}
                 <button onClick={() => setIsSearchOpen(false)} className="p-2 hover:bg-surface-2 rounded-xl">

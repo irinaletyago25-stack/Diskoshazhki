@@ -3,6 +3,7 @@ export interface Habit {
   name: string;
   icon: string;
   dates: string[];
+  archived?: boolean;
 }
 
 export interface GoalHistory {
@@ -18,6 +19,10 @@ export interface Goal {
   unit: string;
   deadline: string;
   history: GoalHistory[];
+  icon?: string;
+  color?: string;
+  archived?: boolean;
+  step?: number;
 }
 
 export interface Task {
@@ -58,6 +63,7 @@ export interface AppSettings {
   hasSeenOnboarding: boolean;
   dynamicLighting: boolean;
   soundEffects: boolean;
+  ecoMode: boolean;
   heatmapMode: 'grid' | 'radial';
   autoSave: boolean;
 }
@@ -70,6 +76,7 @@ export interface PomodoroState {
   sessionsCompleted: number;
   totalFocusMinutes: number;
   focusTaskId: string | null;
+  ambientType: 'none' | 'cyber' | 'space' | 'rain';
 }
 
 export interface Achievement {
