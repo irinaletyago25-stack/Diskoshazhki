@@ -279,23 +279,31 @@ const CatPopup = ({
                 <RefreshCw className="animate-spin text-primary" size={40} />
               </div>
             )}
-            <div className="absolute top-4 left-4 right-4 flex justify-between items-start">
+            <div className="absolute top-4 left-4 right-4 flex justify-between items-start z-10">
                <div className={cn(
-                 "backdrop-blur-sm px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2 max-w-[80%]",
+                 "backdrop-blur-sm px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2 max-w-[65%]",
                  data.isAllDone ? "bg-primary text-white" : "bg-white/90 text-primary"
                )}>
                  <span className="text-lg flex-shrink-0">{data.mood.emoji}</span>
                  <span className="truncate">{data.mood.phrase}</span>
                </div>
                
-               {data.img && data.img !== 'error' && (
+               <div className="flex items-center gap-2">
+                 {data.img && data.img !== 'error' && (
+                   <button 
+                     onClick={(e) => { e.stopPropagation(); onRefresh(); }}
+                     className="p-2 bg-white/90 text-primary rounded-full shadow-sm hover:scale-110 transition-transform active:scale-95"
+                   >
+                     <RefreshCw size={18} />
+                   </button>
+                 )}
                  <button 
-                   onClick={(e) => { e.stopPropagation(); onRefresh(); }}
-                   className="p-2 bg-white/90 text-primary rounded-full shadow-sm hover:scale-110 transition-transform active:scale-95"
+                   className="p-2 bg-black/20 backdrop-blur-sm hover:bg-black/40 text-white rounded-full transition-colors shadow-sm"
+                   onClick={(e) => { e.stopPropagation(); onClose(); }}
                  >
-                   <RefreshCw size={18} />
+                   <X size={20} />
                  </button>
-               )}
+               </div>
             </div>
           </div>
           
@@ -352,12 +360,6 @@ const CatPopup = ({
               {data.isAllDone ? 'Я умница! ✨' : 'Просто закрыть'}
             </button>
           </div>
-          <button 
-            className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full transition-colors z-10"
-            onClick={onClose}
-          >
-            <X size={20} />
-          </button>
         </motion.div>
       </div>
     )}
