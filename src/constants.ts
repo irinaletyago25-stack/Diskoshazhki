@@ -54,6 +54,7 @@ export const DEFAULT_STATE: AppState = {
     userName: '',
     notifEnabled: false,
     notifTime: '21:00',
+    pomodoroNotifTime: 0,
     hasSeenOnboarding: false,
     dynamicLighting: true,
     soundEffects: true,

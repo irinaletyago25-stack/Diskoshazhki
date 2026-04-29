@@ -220,7 +220,7 @@ const ConfirmModal = ({
           <p className="text-muted leading-relaxed">{text}</p>
           <div className="flex gap-3 pt-4">
             <button className="chip-btn flex-1" onClick={onCancel}>Отмена</button>
-            <button className="btn flex-1 bg-bad hover:bg-bad/80" onClick={onConfirm}>Да, уверен</button>
+            <button className="flex-1 min-h-[46px] rounded-[14px] font-[800] bg-bad hover:bg-bad/80 text-white transition-all shadow-sm" onClick={onConfirm}>Да, уверен</button>
           </div>
         </motion.div>
       </div>
@@ -332,7 +332,7 @@ const CatPopup = ({
             <div className="flex gap-2">
                <button 
                  disabled={!data.img}
-                 className="btn flex-1 bg-primary hover:bg-primary-2 text-white flex items-center justify-center gap-2 py-3 rounded-2xl disabled:opacity-50 transition-all active:scale-95 shadow-lg shadow-primary/20"
+                 className="flex-1 w-full min-h-[46px] bg-primary hover:bg-primary-2 text-white font-[800] flex items-center justify-center gap-2 py-3 rounded-[14px] disabled:opacity-50 transition-all active:scale-95 shadow-md shadow-primary/20"
                  onClick={() => {
                    onSave(data.img);
                    onClose();
@@ -1048,11 +1048,35 @@ export default function App() {
   }, []);
 
   const lastNotifiedRef = useRef<string | null>(null);
+  const earlyNotifiedRef = useRef<string | null>(null);
 
   // --- Pomodoro Logic ---
   useEffect(() => {
     let interval: any;
+    const isWork = state.pomodoro.mode === 'work';
+    const activeTask = state.tasks.find(t => t.id === state.pomodoro.focusTaskId);
+    const notifTimeOffset = (state.settings.pomodoroNotifTime || 0) * 60;
+    const cycleKey = `${state.pomodoro.mode}-${state.pomodoro.sessionsCompleted}`;
+
     if (state.pomodoro.isActive && state.pomodoro.timeLeft > 0) {
+      if (notifTimeOffset > 0 && state.pomodoro.timeLeft === notifTimeOffset) {
+        if (earlyNotifiedRef.current !== cycleKey) {
+          earlyNotifiedRef.current = cycleKey;
+          if (state.settings.notifEnabled) {
+            try {
+              new Notification(isWork ? 'Фокус скоро завершится' : 'Перерыв скоро окончен', {
+                body: isWork 
+                  ? `Через ${state.settings.pomodoroNotifTime} мин. ${activeTask ? 'Задача: ' + activeTask.text : ''}` 
+                  : `Через ${state.settings.pomodoroNotifTime} мин. Возвращаемся к задачам!`,
+                icon: '🪩'
+              });
+            } catch (e) {
+              console.warn("Notification failed", e);
+            }
+          }
+        }
+      }
+
       interval = setInterval(() => {
         playSound('tick');
         handleStateChange(prev => ({
@@ -1061,7 +1085,6 @@ export default function App() {
         }));
       }, 1000);
     } else if (state.pomodoro.isActive && state.pomodoro.timeLeft === 0) {
-      const isWork = state.pomodoro.mode === 'work';
       const nextMode = isWork ? 'break' : 'work';
       
       // Use previous duration or logical defaults
@@ -1075,14 +1098,15 @@ export default function App() {
       
       const nextTime = nextDuration * 60;
       
-      const cycleKey = `${state.pomodoro.mode}-${state.pomodoro.sessionsCompleted}`;
       if (lastNotifiedRef.current !== cycleKey) {
         lastNotifiedRef.current = cycleKey;
         showToast(isWork ? 'Время отдыхать! ☕' : 'Пора за работу! 💻', 'success');
-        if (state.settings.notifEnabled) {
+        if (state.settings.notifEnabled && notifTimeOffset === 0) {
           try {
             new Notification(isWork ? 'Фокус завершен' : 'Перерыв окончен', {
-              body: isWork ? 'Отличная работа! Отдохни 5 минут.' : 'Возвращаемся к задачам!',
+              body: isWork 
+                ? `Отличная работа! Отдохни 5 минут. ${activeTask ? 'Закончили: ' + activeTask.text : ''}` 
+                : 'Возвращаемся к задачам!',
               icon: '🪩'
             });
           } catch (e) {
@@ -1104,7 +1128,7 @@ export default function App() {
       }));
     }
     return () => clearInterval(interval);
-  }, [state.pomodoro.isActive, state.pomodoro.timeLeft, state.pomodoro.mode]);
+  }, [state.pomodoro.isActive, state.pomodoro.timeLeft, state.pomodoro.mode, state.settings.notifEnabled, state.settings.pomodoroNotifTime, state.tasks, state.pomodoro.focusTaskId]);
 
   const togglePomodoro = () => {
     playSound('click');
@@ -1146,6 +1170,97 @@ export default function App() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  // --- Ambient Audio Management ---
+  useEffect(() => {
+    const ctx = audioCtxRef.current;
+    
+    const stopAmbient = () => {
+      if (ambientNodeRef.current) {
+        try {
+          ambientNodeRef.current.disconnect();
+          if ((ambientNodeRef.current as any).stop) {
+            (ambientNodeRef.current as any).stop();
+          }
+        } catch (e) {}
+        ambientNodeRef.current = null;
+      }
+    };
+
+    if (state.pomodoro.isActive && state.pomodoro.ambientType !== 'none') {
+      if (!ctx) return; // Cannot play if no context
+      
+      stopAmbient();
+      
+      try {
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+        
+        const type = state.pomodoro.ambientType;
+        if (type === 'cyber' || type === 'rain') {
+          const bufferSize = ctx.sampleRate * 2;
+          const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+          const data = buffer.getChannelData(0);
+          for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+          }
+          const noise = ctx.createBufferSource();
+          noise.buffer = buffer;
+          noise.loop = true;
+          
+          const filter = ctx.createBiquadFilter();
+          filter.type = type === 'rain' ? 'lowpass' : 'lowpass';
+          filter.frequency.value = type === 'rain' ? 300 : 800; // Cyber noise is sharper
+          
+          const gain = ctx.createGain();
+          gain.gain.value = type === 'rain' ? 0.4 : 0.08;
+          
+          noise.connect(filter);
+          filter.connect(gain);
+          gain.connect(ctx.destination);
+          
+          noise.start();
+          ambientNodeRef.current = noise;
+          
+        } else if (type === 'space') {
+          // Drone space sound
+          const osc1 = ctx.createOscillator();
+          const osc2 = ctx.createOscillator();
+          osc1.type = 'sine';
+          osc2.type = 'triangle';
+          osc1.frequency.value = 55; // low A
+          osc2.frequency.value = 55.5; // slight detune
+          
+          const gain = ctx.createGain();
+          gain.gain.value = 0.1;
+          
+          osc1.connect(gain);
+          osc2.connect(gain);
+          gain.connect(ctx.destination);
+          
+          osc1.start();
+          osc2.start();
+          
+          // Custom node wrapper to stop both
+          ambientNodeRef.current = gain;
+          (ambientNodeRef.current as any).stop = () => {
+            osc1.stop();
+            osc2.stop();
+          };
+        }
+      } catch (e) {
+        console.warn('Ambient audio failed to play', e);
+      }
+    } else {
+      stopAmbient();
+    }
+
+    return () => {
+      // Don't stop ambient on every render, only we rely on dependencies to re-trigger
+      // But if component unmounts, stop it. Since it's App level, unmounting is rare.
+    };
+  }, [state.pomodoro.isActive, state.pomodoro.ambientType]);
+
   // --- Side Effects ---
   const lastSavedStateRef = useRef<string>('');
 
@@ -1157,7 +1272,7 @@ export default function App() {
 
     const timeoutId = setTimeout(async () => {
       try {
-        await setDoc(doc(db, 'users', user.uid), state);
+        await setDoc(doc(db, 'users', user.uid), JSON.parse(currentStateStr));
         lastSavedStateRef.current = currentStateStr;
       } catch (e) {
         handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}`);
@@ -2016,24 +2131,71 @@ export default function App() {
             ))}
           </div>
 
-          <div className="w-full max-w-md relative group">
-            <select 
-              className="w-full p-4 rounded-2xl bg-surface border border-line appearance-none font-bold text-sm cursor-pointer hover:border-primary transition-colors pr-12 focus:ring-2 focus:ring-primary/20 outline-none"
-              value={state.pomodoro.focusTaskId || ''}
-              onChange={(e) => handleStateChange(prev => ({
-                ...prev,
-                pomodoro: { ...prev.pomodoro, focusTaskId: e.target.value || null }
-              }))}
-            >
-              <option value="">🎯 Выбери задачу для фокуса...</option>
+          <div className="w-full max-w-md flex flex-col gap-2 mt-4">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-muted px-2">Выберите задачу для фокуса</h3>
+            <div className="flex flex-col gap-2 max-h-48 overflow-y-auto no-scrollbar scroll-smooth p-1">
+              <button
+                onClick={() => handleStateChange(prev => ({ ...prev, pomodoro: { ...prev.pomodoro, focusTaskId: null } }))}
+                className={cn(
+                  "text-left p-3 rounded-2xl border transition-all flex items-center gap-3",
+                  !state.pomodoro.focusTaskId 
+                    ? "bg-primary text-white border-transparent shadow-glow"
+                    : "bg-surface border-line hover:border-primary-2 text-text"
+                )}
+              >
+                <div className={cn("w-8 h-8 rounded-full flex items-center justify-center", !state.pomodoro.focusTaskId ? "bg-white/20" : "bg-bg-soft")}>
+                  🎯
+                </div>
+                <div className="flex-1 truncate text-sm font-bold">Свободный фокус</div>
+              </button>
+              
               {state.tasks.filter(t => !t.done).map(t => (
-                <option key={t.id} value={t.id}>
-                  {BASE_CAT_EMOJI[t.tags[0]] || '✨'} {t.text}
-                </option>
+                <button
+                  key={t.id}
+                  onClick={() => handleStateChange(prev => ({
+                    ...prev,
+                    pomodoro: { ...prev.pomodoro, focusTaskId: t.id }
+                  }))}
+                  className={cn(
+                    "text-left p-3 rounded-2xl border transition-all flex items-center gap-3 group relative overflow-hidden",
+                    state.pomodoro.focusTaskId === t.id 
+                      ? "bg-primary text-white border-transparent shadow-glow"
+                      : "bg-surface border-line hover:border-primary-2 text-text"
+                  )}
+                >
+                  <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-lg", state.pomodoro.focusTaskId === t.id ? "bg-white/20" : "bg-bg-soft")}>
+                    {t.tags && t.tags.length > 0 && BASE_CAT_EMOJI[t.tags[0]] ? BASE_CAT_EMOJI[t.tags[0]] : '✨'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate text-sm font-bold">{t.text}</div>
+                    {t.tags && t.tags.length > 0 && (
+                      <div className={cn(
+                        "text-[9px] uppercase tracking-wider font-bold mt-0.5",
+                        state.pomodoro.focusTaskId === t.id ? "text-white/70" : "text-muted"
+                      )}>
+                        {t.tags[0]}
+                      </div>
+                    )}
+                  </div>
+                  {state.pomodoro.focusTaskId === t.id && (
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 px-4 bg-good flex items-center text-white font-bold text-xs uppercase tracking-wider hover:brightness-110 transition-all z-10 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        playSound('success');
+                        handleStateChange(prev => ({
+                          ...prev,
+                          tasks: prev.tasks.map(task => task.id === t.id ? { ...task, done: true } : task),
+                          pomodoro: { ...prev.pomodoro, focusTaskId: null } // switch back to free focus
+                        }));
+                      }}
+                    >
+                      <Check size={16} className="mr-1" />
+                      Готово
+                    </div>
+                  )}
+                </button>
               ))}
-            </select>
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-muted group-hover:text-primary transition-colors">
-              <ChevronLeft className="-rotate-90" size={18} />
             </div>
           </div>
         </div>
@@ -2168,22 +2330,23 @@ export default function App() {
               className="w-full max-w-md glass-card p-6 rounded-3xl border-primary/20 flex items-center gap-4"
             >
               <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-3xl">
-                {BASE_CAT_EMOJI[activeTask.tags[0]] || '🎯'}
+                {activeTask.tags && activeTask.tags.length > 0 && BASE_CAT_EMOJI[activeTask.tags[0]] ? BASE_CAT_EMOJI[activeTask.tags[0]] : '🎯'}
               </div>
-              <div className="flex-1">
-                <div className="text-[10px] font-black uppercase text-primary tracking-widest mb-1">Сейчас в фокусе</div>
-                <div className="font-bold text-lg leading-snug">{activeTask.text}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] font-black uppercase text-primary tracking-widest mb-1 truncate">Сейчас в фокусе</div>
+                <div className="font-bold text-lg leading-snug break-words">{activeTask.text}</div>
               </div>
               <button 
                 className={cn(
-                  "w-12 h-12 rounded-full flex items-center justify-center transition-all",
+                  "w-12 h-12 rounded-full flex shrink-0 items-center justify-center transition-all",
                   activeTask.done ? "bg-good text-white" : "border-2 border-line hover:border-primary text-muted hover:text-primary"
                 )}
                 onClick={() => {
                   playSound('success');
                   handleStateChange(prev => ({
                     ...prev,
-                    tasks: prev.tasks.map(t => t.id === activeTask.id ? { ...t, done: !t.done } : t)
+                    tasks: prev.tasks.map(t => t.id === activeTask.id ? { ...t, done: !t.done } : t),
+                    pomodoro: { ...prev.pomodoro, focusTaskId: null } 
                   }));
                 }}
               >
@@ -3892,12 +4055,21 @@ export default function App() {
               {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
               {isRecording ? 'Слушаю...' : 'Голосовая заметка'}
             </button>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap justify-end">
               <button 
                 className={cn("chip-btn flex items-center gap-2", isAIThinking && "opacity-50 pointer-events-none")}
                 onClick={extractTasksFromJournal}
               >
                 <ListTodo size={14} className="text-primary" /> Задачи
+              </button>
+              <button 
+                className="chip-btn flex items-center gap-2"
+                onClick={() => {
+                  showToast('Запись сохранена! 📝', 'success');
+                  playSound('success');
+                }}
+              >
+                <Check size={14} className="text-good" /> Сохранить
               </button>
               <button 
                 className={cn("btn", isAIThinking && "opacity-50 pointer-events-none")}
@@ -4252,7 +4424,7 @@ export default function App() {
             <div>
               <h4 className="text-[10px] font-black uppercase tracking-widest text-muted mb-4">Статистика 📊</h4>
               <button 
-                className="btn w-full py-4 flex items-center justify-center gap-3 bg-primary-soft text-primary border border-primary/20 hover:bg-primary hover:text-white transition-all shadow-sm"
+                className="w-full py-4 min-h-[46px] rounded-[14px] font-[800] flex items-center justify-center gap-3 bg-primary-soft text-primary border border-primary/20 hover:bg-primary hover:text-white transition-all shadow-sm"
                 onClick={() => setIsReportModalOpen(true)}
               >
                 <BarChart3 size={20} />
@@ -4398,33 +4570,52 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="flex items-center justify-between p-4 rounded-3xl bg-bg-soft border border-line/50">
-                <div className="space-y-0.5">
-                  <div className="font-black text-xs">Уведомления</div>
-                  <div className="text-[10px] text-muted font-bold opacity-60">Пуши о завершении фокуса</div>
+              <div className="flex flex-col gap-4 p-4 rounded-3xl bg-bg-soft border border-line/50">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <div className="font-black text-xs">Уведомления фокуса</div>
+                    <div className="text-[10px] text-muted font-bold opacity-60">За сколько минут до конца</div>
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      const status = state.settings.notifEnabled;
+                      if (!status && "Notification" in window) {
+                        const res = await Notification.requestPermission();
+                        if (res !== 'granted') return;
+                      }
+                      handleStateChange(prev => ({
+                        ...prev,
+                        settings: { ...prev.settings, notifEnabled: !status }
+                      }));
+                    }}
+                    className={cn(
+                      "w-12 h-6 rounded-full p-1 transition-colors relative",
+                      state.settings.notifEnabled ? "bg-primary" : "bg-line"
+                    )}
+                  >
+                    <motion.div 
+                      animate={{ x: state.settings.notifEnabled ? 24 : 0 }}
+                      className="w-4 h-4 bg-white rounded-full shadow-sm"
+                    />
+                  </button>
                 </div>
-                <button 
-                  onClick={async () => {
-                    const status = state.settings.notifEnabled;
-                    if (!status && "Notification" in window) {
-                      const res = await Notification.requestPermission();
-                      if (res !== 'granted') return;
-                    }
-                    handleStateChange(prev => ({
-                      ...prev,
-                      settings: { ...prev.settings, notifEnabled: !status }
-                    }));
-                  }}
-                  className={cn(
-                    "w-12 h-6 rounded-full p-1 transition-colors relative",
-                    state.settings.notifEnabled ? "bg-primary" : "bg-line"
-                  )}
-                >
-                  <motion.div 
-                    animate={{ x: state.settings.notifEnabled ? 24 : 0 }}
-                    className="w-4 h-4 bg-white rounded-full shadow-sm"
-                  />
-                </button>
+                
+                {state.settings.notifEnabled && (
+                  <div className="flex gap-2">
+                    {[0, 1, 3, 5].map(v => (
+                      <button
+                        key={v}
+                        onClick={() => handleStateChange(prev => ({ ...prev, settings: { ...prev.settings, pomodoroNotifTime: v } }))}
+                        className={cn(
+                          "flex-1 py-2 text-xs font-bold rounded-2xl transition-all border",
+                          (state.settings.pomodoroNotifTime || 0) === v ? "bg-primary text-white border-primary" : "bg-surface border-line hover:border-primary/30"
+                        )}
+                      >
+                        {v === 0 ? 'Ровно' : `За ${v} мин`}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between p-4 rounded-3xl bg-bg-soft border border-line/50">
@@ -4706,7 +4897,7 @@ export default function App() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="w-full max-w-lg bg-surface rounded-[48px] border border-white/10 shadow-2xl overflow-hidden glass relative"
+              className="w-full max-w-lg bg-surface rounded-[48px] border border-white/10 shadow-2xl overflow-hidden relative"
             >
               <div className="p-8 space-y-8">
                 <div className="flex justify-between items-center">
@@ -5156,18 +5347,34 @@ export default function App() {
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                {searchQuery ? (
+                {searchQuery ? (() => {
+                  const query = searchQuery.toLowerCase();
+                  const matchSearch = (text: string) => text.toLowerCase().includes(query);
+                  const getPriorityText = (p: string) => p === 'urgent' ? 'срочно' : p === 'important' ? 'важно' : 'когда-нибудь';
+                  
+                  const filteredNotes = Object.entries(state.journalEntries).filter(([date, e]) => 
+                    matchSearch((e as JournalEntry).note) || matchSearch(date)
+                  );
+                  
+                  const filteredTasks = state.tasks.filter(t => 
+                    matchSearch(t.text) || 
+                    matchSearch(getPriorityText(t.priority)) || 
+                    matchSearch(t.date || '') || 
+                    t.tags.some(tag => matchSearch(tag))
+                  );
+                  
+                  const filteredHabits = state.habits.filter(h => 
+                    matchSearch(h.name) || h.dates.some(d => matchSearch(d))
+                  );
+
+                  return (
                   <div className="space-y-6">
                     {/* Notes */}
-                    {Object.entries(state.journalEntries)
-                      .filter(([date, e]) => (e as JournalEntry).note.toLowerCase().includes(searchQuery.toLowerCase()))
-                      .length > 0 && (
+                    {filteredNotes.length > 0 && (
                       <div className="space-y-2">
                         <div className="text-[10px] text-muted font-bold uppercase tracking-widest px-2">Заметки</div>
                         <div className="grid gap-2">
-                          {Object.entries(state.journalEntries)
-                            .filter(([date, e]) => (e as JournalEntry).note.toLowerCase().includes(searchQuery.toLowerCase()))
-                            .map(([date, e]) => {
+                          {filteredNotes.map(([date, e]) => {
                               const entry = e as JournalEntry;
                               return (
                                 <div key={date} className="card cursor-pointer hover:bg-surface-2 group" onClick={() => { setSelectedDate(date); setIsDayModalOpen(true); setIsSearchOpen(false); }}>
@@ -5184,23 +5391,20 @@ export default function App() {
                     )}
 
                     {/* Tasks */}
-                    {state.tasks
-                      .filter(t => t.text.toLowerCase().includes(searchQuery.toLowerCase()))
-                      .length > 0 && (
+                    {filteredTasks.length > 0 && (
                       <div className="space-y-2">
                         <div className="text-[10px] text-muted font-bold uppercase tracking-widest px-2">Задачи</div>
                         <div className="grid gap-2">
-                          {state.tasks
-                            .filter(t => t.text.toLowerCase().includes(searchQuery.toLowerCase()))
-                            .map(t => (
+                          {filteredTasks.map(t => (
                               <div key={t.id} className="card flex items-center gap-3 hover:bg-surface-2 cursor-pointer" onClick={() => handleTaskToggle(t.id)}>
                                 <div className={cn("w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors", t.done ? "bg-good border-good" : "border-line")}>
                                   {t.done && <Check size={12} className="text-white" />}
                                 </div>
                                 <div className="flex-1">
                                   <div className={cn("font-bold text-sm", t.done && "line-through text-muted")}>{t.text}</div>
-                                  <div className="text-[10px] text-muted flex gap-2">
+                                  <div className="text-[10px] text-muted flex gap-2 flex-wrap">
                                     <span>{t.priority === 'urgent' ? '🔥 Срочно' : t.priority === 'important' ? '⭐ Важно' : '☁️ Когда-нибудь'}</span>
+                                    {t.date && <span>📅 {t.date}</span>}
                                     {t.tags.length > 0 && <span>• {t.tags.join(', ')}</span>}
                                   </div>
                                 </div>
@@ -5211,22 +5415,20 @@ export default function App() {
                     )}
 
                     {/* Habits */}
-                    {state.habits
-                      .filter(h => h.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                      .length > 0 && (
+                    {filteredHabits.length > 0 && (
                       <div className="space-y-2">
                         <div className="text-[10px] text-muted font-bold uppercase tracking-widest px-2">Привычки</div>
                         <div className="grid gap-2">
-                          {state.habits
-                            .filter(h => h.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                            .map(h => (
+                          {filteredHabits.map(h => (
                               <div key={h.id} className="card flex items-center gap-3 hover:bg-surface-2 cursor-pointer" onClick={() => { setActiveSection('habits'); setIsSearchOpen(false); }}>
-                                <div className="w-10 h-10 rounded-2xl bg-surface-2 flex items-center justify-center text-xl">
+                                <div className="w-10 h-10 rounded-2xl bg-surface-2 flex items-center justify-center text-xl shrink-0">
                                   {h.icon}
                                 </div>
-                                <div>
-                                  <div className="font-bold text-sm">{h.name}</div>
-                                  <div className="text-[10px] text-muted">Выполнено {h.dates.length} раз</div>
+                                <div className="min-w-0">
+                                  <div className="font-bold text-sm truncate">{h.name}</div>
+                                  <div className="text-[10px] text-muted truncate">
+                                    Выполнено {h.dates.length} раз. Дни: {h.dates.length > 0 ? h.dates.slice(-5).reverse().join(', ') : 'ещё нет дневников'}
+                                  </div>
                                 </div>
                               </div>
                             ))}
@@ -5235,10 +5437,7 @@ export default function App() {
                     )}
 
                     {/* Empty State */}
-                    {searchQuery && 
-                      !state.tasks.some(t => t.text.toLowerCase().includes(searchQuery.toLowerCase())) &&
-                      !state.habits.some(h => h.name.toLowerCase().includes(searchQuery.toLowerCase())) &&
-                      !Object.values(state.journalEntries).some(e => (e as JournalEntry).note.toLowerCase().includes(searchQuery.toLowerCase())) && (
+                    {filteredNotes.length === 0 && filteredTasks.length === 0 && filteredHabits.length === 0 && (
                         <div className="text-center py-10">
                           <div className="text-4xl mb-4">🔍</div>
                           <div className="text-muted font-bold">Ничего не найдено</div>
@@ -5247,7 +5446,9 @@ export default function App() {
                       )
                     }
                   </div>
-                ) : (
+                  );
+                })()
+                : (
                   <div className="text-center py-20">
                     <div className="text-4xl mb-4 opacity-20">✨</div>
                     <div className="text-muted font-bold">Что ищем сегодня?</div>
@@ -5321,7 +5522,7 @@ export default function App() {
                   </div>
 
                   <div className="flex gap-3 pt-4">
-                    <button className="flex-1 btn bg-surface-2 text-text border-line" onClick={() => setIsHabitModalOpen(false)}>Отмена</button>
+                    <button className="flex-1 chip-btn" onClick={() => setIsHabitModalOpen(false)}>Отмена</button>
                     <button className="flex-1 btn" onClick={handleAddHabit}>Создать</button>
                   </div>
                 </div>

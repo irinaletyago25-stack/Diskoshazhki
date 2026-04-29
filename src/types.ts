@@ -60,6 +60,7 @@ export interface AppSettings {
   userName: string;
   notifEnabled: boolean;
   notifTime: string;
+  pomodoroNotifTime: number;
   hasSeenOnboarding: boolean;
   dynamicLighting: boolean;
   soundEffects: boolean;
